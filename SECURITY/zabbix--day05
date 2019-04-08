@@ -1,0 +1,313 @@
+2019-04-08
+
+###################################################################################
+环境准备：
+192.168.2.5 监控服务器
+192.168.2.100  监控客户端   关闭防火墙、selinux
+192.168.2.200  监控客户端
+
+一、监控概述
+1.1 监控的目的
+    1）报告系统运行状况
+	* 每一部分必须同时监控
+	* 内容包括吞吐量、反应时间、使用效率等
+    2）提前发现问题
+	* 进行服务器性能调整前，知道调整什么
+	* 找出系统的瓶颈在什么地方
+
+1.2 监控的资源类别
+   1）公开数据
+	* web、FTP、SSH、数据库等应用服务
+	* TCP或UDP端口
+   2）私有数据
+	* CPU、内存、磁盘、网卡流量等使用信息
+	* 用户、进程等运行信息
+
+二、监控软件
+   1）系统监控命令
+	free     #查看内存信息          	swapon -s     #查看交换分区信息
+	df -h    #查看磁盘的使用率		uptime	 #查看CPU负载
+	ifconfig #查看网卡信息		ss或netstat   #查看本机监听的端口信息
+	ping    #查看服务器的状态		
+	traceroute  #查看路由状态		iostat   #查看磁盘的占用
+
+三、自动化监控系统
+	1）Cacti	
+	   * 基于SNMP协议的监控软件，强大的绘图能力
+	2）Nagios
+	   * 基于Agent监控，强大的状态检查与报警机制
+	   * 插件极多，自己写监控脚本潜入到Nagios非常方便
+	3）Zabbix
+	   * 基于多种监控机制，支持分布式监控
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+四、zabbix基础
+4.1 zabbix简介
+	1）Zabbix是一个高度集成的监控解决方案
+	2）可以实现企业级的开源分布式监控
+	3）Zabbix通过C/S模式采集监控数据
+	4）Zabbix通过B/S模式实现Web管理    #
+
+4.2 Zabbix监控拓扑
+	1）监控服务器
+	  * 监控服务器可以通过SNMP或Agent采集数据
+	  * 数据可以写入MySQL、Oracle等数据库中
+	  * 服务器使用LNMP实现web前端的管理   #采用PHP
+	2）被监控主机
+	  * 被监控主机需要安装Agent
+	  * 常见的网络设备一般支持SNMP
+
+4.3 部署Zabbix 监控平台LNMP架构
+    1）部署LNMP环境
+	]# yum -y install gcc pcre-devel  openssl-devel  #安装依赖包
+	]# tar -xf nginx-1.12.2.tar.gz  #安装nginx
+	]# cd nginx-1.12.2
+	]# ./configure --with-http_ssl_module
+	]# make && make install
+
+	]# yum -y install php php-mysql mariadb mariadb-devel mariadb-server
+	]# yum -y  install  php-fpm-5.4.16-42.el7.x86_64.rpm
+	    #注意，php-fpm这个软件包在lnmp_soft/目录下
+
+   2）修改Nginx配置文件
+	]# vim /usr/local/nginx/conf/nginx.conf  #并开启支持PHP功能
+	.......
+	http{
+	.......
+	    fastcgi_buffers 8 16k;         #缓存php生成的页面内容，8个16k
+	    fastcgi_buffer_size 32k;       #缓存php生产的头部信息
+	    fastcgi_connect_timeout 300;   #连接PHP的超时时间
+	    fastcgi_send_timeout 300;      #发送请求的超时时间
+	    fastcgi_read_timeout 300;      #读取请求的超时时间
+		.....
+   3）启动Nginx、PHP-FPM、Mariadb服务器，关闭SElinux和防火墙
+	]# systemctl start  mariadb
+	]# systemctl start  php-fpm
+	]# ln -s /usr/local/nginx/sbin/nginx /sbin/nginx
+	]# nginx
+
+   4）客户端测试LNMP环境
+	]# curl http://192.168.2.5/test.php
+
+
+4.4 部署监控服务器Zabbix-server
+   1）源码安装Zabbix Server
+	]# yum -y install  net-snmp-devel  curl-devel  #安装zabbix所需的依赖包
+	]# yum -y install  libevent-devel-2.0.21-4.el7.x86_64.rpm  #安装依赖包
+	    #注意libevent-devel这个软件包在lnmp_soft目录下有提供
+	]# cd lnmp_soft/
+	]# tar -xf zabbix-3.4.4.tar.gz
+	]# cd zabbix-3.4.4/
+	]# ./configure  --enable-server \    #默认安装目录为/usr/local/etc/zabbix*
+		> --enable-proxy --enable-agent   \
+		> --with-mysql=/usr/bin/mysql_config \  #默认命令存放在/usr/local/bin
+		> --with-net-snmp --with-libcurl
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+	# --enable-server安装部署zabbix服务器端软件
+	# --enable-agent安装部署zabbix被监控端软件
+	# --enable-proxy安装部署zabbix代理相关软件
+	# --with-mysql配置mysql_config路径
+	# --with-net-snmp允许zabbix通过snmp协议监控其他设备
+	# --with-libcurl安装相关curl库文件，这样zabbix就可以通过curl连接http等服务，
+          测试被监控主机服务的状态
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+	]# make && make install  
+
+   2）初始化Zabbix
+	zabbix配置文件默认存放在：/usr/local/etc/
+	默认命令存放在：/usr/local/sbin
+* 创建数据库，上线Zabbix的Web页面
+	]# mysql
+	  > create database zabbix character set utf8;
+	  > grant all on zabbix.* to zabbix@"localhost" identified by "zabbix";
+	]# cd lnmp_soft/zabbix-3.4.4/database/mysql/
+	]# mysql -uzabbix -pzabbix zabbix < schema.sql   #导入顺序：从后往前
+	]# mysql -uzabbix -pzabbix zabbix < images.sql
+	]# mysql -uzabbix -pzabbix zabbix < data.sql
+	    # 刚刚创建是空数据库，zabbix源码包目录下，有提前准备好的数据
+	    # 使用mysql导入这些数据即可（注意导入顺序）
+
+* 上线Zabbix的Web页面	
+	]# cd lnmp_soft/zabbix-3.4.4/frontends/php/
+	]# cp -r * /usr/local/nginx/html/
+	]# chmod -R 777 /usr/local/nginx/html/*
+
+* 修改Zabbix_server配置文件，设置数据库相关参数，启动Zabbix_server服务
+	]# vim /usr/local/etc/zabbix_server.conf  #默认端口 10051
+		.......
+	    38 LogFile=/tmp/zabbix_server.log   #设置日志，仅查看以下即可
+	    85 DBHost=localhost   #/数据库主机，默认该行被注释
+	    95 DBName=zabbix      #设置数据库名称(默认为zabbix)
+	    111 DBUser=zabbix      #设置数据库账户（数据库授权用户）
+	    119 DBPassword=zabbix  #设置数据库密码(授权用户密码)，默认该行被注释
+		......
+	]# useradd -s /sbin/nologin zabbix   #不创建用户无法启动服务
+	]# zabbix_server      #启动服务
+	]# ss -ntulp |grep zabbix_server    #确认连接状态，端口10051
+	注意：如果是因为配置文件不对，导致服务无法启动时，不要重复执行zabbix_server，
+	      一定要先使用killall zabbix_server关闭服务后，再重新启动一次。
+
+* 修改Zabbix_agent配置文件，启动Zabbix_agent服务（客户端被监控时使用：自己作自己的客户端）
+	]# vim /usr/local/etc/zabbix_agentd.conf  #默认端口 10050
+	       .......
+	   30 LogFile=/tmp/zabbix_agentd.log    #设置日志文件
+	   93 Server=127.0.0.1,192.168.2.5     #指定监控服务器的IP地址
+	   134 ServerActive=127.0.0.1:10051,192.168.2.5  #允许哪些主机通过主动模式监控本机
+	   145 Hostname=Zabbix server    #设置本机主机名
+	   280 UnsafeUserParameters=1    #是否允许自定义key （默认为0 禁止使用）
+	      .......
+	]# zabbix_agentd    #启动监控agent
+	]# ss -ntulp |grep zabbix_agentd   #查看端口信息为10050
+
+	提示：如果是因为配置文件不对，导致服务无法启动时，不要重复执行zabbix_agentd，
+	      一定要先使用killall zabbix_agentd关闭服务后，再重新启动一次。
+	]# killall -9 zabbix_server
+	]# zabbix_agentd
+
+	]# firefox http://192.168.2.5/index.php
+          #第一次访问，初始化PHP页面会检查计算机环境是否满足要求，如果不满足会给出修改建议
+          #默认会提示PHP的配置不满足环境要求，需要修改PHP配置文件,根据提示修改配置文件
+
+根据错误提示，修改PHP配置文件，满足Zabbix_server的Web环境要求
+php-bcmath和php-mbstring都在lnmp_soft目录下有提供软件包。
+	]# yum -y install php-gd php-xml
+	]# yum -y install php-bcmath-5.4.16-42.el7.x86_64.rpm \
+                        php-mbstring-5.4.16-42.el7.x86_64.rpm
+	]# vim /etc/php.ini
+	  .........
+	  date.timezone = Asia/Shanghai    #设置时区
+	  max_execution_time = 300         #最大执行时间，秒
+	  post_max_size = 32M              #POST数据最大容量
+	  max_input_time = 300             #服务器接收数据的时间限制
+	  memory_limit = 128M              #内存容量限制
+	  ........
+	]# systemctl restart php-fpm   #重启php-fpm服务
+	
+在网页中继续设置：
+	#设置连接数据库的端口，0为默认，不需要改，连接用的用户和密码，这里的用户和密码都为zabbix
+	]# cat /usr/local/nginx/html/conf/zabbix.conf.php  #信息保存在该文件中
+		.....
+		$DB['TYPE']     = 'MYSQL';
+		$DB['SERVER']   = 'localhost';
+		$DB['PORT']     = '0';
+		$DB['DATABASE'] = 'zabbix';
+		$DB['USER']     = 'zabbix';
+		$DB['PASSWORD'] = 'zabbix';	
+
+		$ZBX_SERVER      = '192.168.2.5';
+		$ZBX_SERVER_PORT = '10051';
+		$ZBX_SERVER_NAME = 'my-zabbix';
+	#设置完成后会提示配置信息存储在/usr/local/nginx/html/conf/
+zabbix.conf.php文件中，后期可以在这里修改。
+	#默认跳转到Zabbix登陆界面，默认账户为admin，密码为zabbix
+
+监控服务基本使用：
+	1）修改管理员密码
+	2）修改语言：简体中文
+	3）查看监控模版：配置--->模板
+	4）查看已经监控的主机：配置--->主机---状态（启用）--等可用性变成绿色为已开启监控
+	5）查看监控信息：监测中--->最新数据--->主机（可以过滤zabbix server）
+
+
+客户端配置（在192.168.2.100操作，192.168.2.200作相同操作）
+   1）安装web服务
+	]# yum -y install httpd  #写一个页面
+   2）源码安装zabbix agent软件
+	]# useradd -s /sbin/nologin  zabbix
+	]# yum -y install gcc pcre-devel
+	]# tar -xf zabbix-3.4.4.tar.gz
+	]# cd zabbix-3.4.4/z
+	]# ./configure --enable-agent   #客户端被监控主机
+	]# make && make install 
+	]# ls /usr/local/sbin/  #查看服务启动命令
+	]# ls /usr/local/bin/   #查看命令
+	]# ls /usr/local/etc/   #查看配置文件
+
+修改agent配置文件，启动Agent服务：
+	]# vim /usr/local/etc/zabbix_agentd.conf
+	   ........
+	  30 LogFile=/tmp/zabbix_agentd.log
+	  93 Server=127.0.0.1,192.168.2.5     #允许本机和监控服务器访问
+	  134 ServerActive=192.168.2.5:10051  #
+	  145 Hostname=Zabbixclient_web1      #定义一个名字
+	  ........
+	]# zabbix_agentd    #启动服务
+	]# ss -antulp |grep zabbix_agentd  
+
+配置监控服务器：添加监控的主机
+	1）管理登陆管理界面
+	2）添加监控主机
+	3）选择监控模板
+	4）查看监控数据
+
+
+4 案例4：自定义Zabbix监控项目
+	在被监控的主上定义命令  给监控服务器使用 
+步骤一：被监控主机创建自定义key（在192.168.2.100操作）
+	1）创建自定义key
+	  * 自定义key语法格式为：UserParameter=自定义key名称,命令。
+	  * 自定义的key文件一般存储在/usr/local/etc/zabbix_agentd.conf.d/目录，这里还需要修改
+          zabbix_agentd.conf文件，允许自定义监控key，来读取该目录下的所有文件。
+
+配置在被监控的主机：192.168.2.100
+	]# vim /usr/local/etc/zabbix_agentd.conf
+	   ...........
+	  280 UnsafeUserParameters=1  
+	  265 Include=/usr/local/etc/zabbix_agentd.conf.d/*.conf  #默认是注释的
+
+	]# vim /usr/local/etc/zabbix_agentd.conf.d/get_sum_users.conf
+	   UserParameter=getusers,wc -l /etc/passwd | awk '{print $1}'  #定义命令
+	]# killall -9 zabbix_agentd  #杀死进程
+	]# zabbix_agentd   #重启服务
+
+本机上验证命令：
+	]# zabbix_get --help  #查看帮助
+	]# zabbix_get -s 被监控主机ip  -p 监控端口  -k 自定义key名称
+
+	]# zabbix_get -s 127.0.0.1 -p 10050 -k getusers  #统计系统的总用户个数
+
+
+监控服务器命令行测试命令：
+	]# zabbix_get -s 192.168.2.100 -p 10050 -k getusers  #
+
+
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+192.168.2.5
+	]# ss -antulp |grep 3306 80 9000 80 #检查服务是否开启
+
+明天环境准备：增加两台虚拟机
+192.168.2.101
+192.168.2.102
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
