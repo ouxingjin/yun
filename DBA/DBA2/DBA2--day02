@@ -1,0 +1,256 @@
+2019-03-19
+
+##########################<DBA2--day02>###############################################
+
+一、mysql数据读写分离
+	数据读写分离：把客户端的访问数据查询的请求 和 写数据的请求分别给不同的数据库服务器处理。
+	数据读写分离实现方式：
+		1 通过程序实现：明确告诉程序员查询操作和写数据的操作必须连接不同的服务器
+		2 架设服务结构实现：使用数据读写分离服务的软件（mysql中间件）
+			     相关软件： maxscale   mysql-proxy  mycat
+
+	1.1 部署mysql 一主一从 主从同步结构   53主  54从   57为代理服务器
+		1.1.1 配置主库192.168.4.53
+
+		1.1.2 配置从库192.168.4.54
+
+	1.2 配置mysql代理服务器 192.168.4.57
+		]# systemctl stop mysqld	    #关闭mysqld数据库服务
+		]# systemctl disable mysqld  #设置开机不自启
+	安装软件包：
+		]# rpm -ivh maxscale-2.1.2-1.rhel.7.x86_64.rpm 
+	修改配置文件：
+		]# cp /etc/maxscale.cnf   /etc/maxscale.cnf.bak   #备份主配置文件
+		]# vim /etc/maxscale.cnf
+			 9 [maxscale]     #定义服务器启动后，线程的个数
+			 10 threads=auto  #产生线程个数：自动模式（与cpu内核个数一致）
+
+	 		 18 [server1]		  #指定数据库 主库
+ 			 19 type=server
+			 20 address=192.168.4.53	  #数据库服务器的ip地址
+			 21 port=3306
+			 22 protocol=MySQLBackend
+			 
+			 24 [server2]		  #指定从库
+			 25 type=server
+			 26 address=192.168.4.54	  #从库的ip地址
+			 27 port=3306
+			 28 protocol=MySQLBackend  #后端数据库
+
+			 35 [MySQL Monitor]	   #定义maxscale服务监视的数据库服务器
+			 36 type=monitor
+			 37 module=mysqlmon
+			 38 servers=server1,server2  #监视的服务器
+			 39 user=monitoruser	    #监控用户名	
+			 40 passwd=123456		    #密码
+			 41 monitor_interval=10000   #监视的频率，单位为秒
+
+			 52 #[Read-Only Service]	     #不定义只读服务
+			 53 #type=service
+			 54 #router=readconnroute
+			 55 #servers=server1
+			 56 #user=myuser
+			 57 #passwd=mypwd
+			 58 #router_options=slave
+
+			 63 [Read-Write Service]     #定义读写分离服务
+			 64 type=service
+			 65 router=readwritesplit
+			 66 servers=server1,server2
+			 67 user=scaluser     	#路由用户：验证连接服务时访问数据库服务器的用户是否存在
+			 68 passwd=123456
+			 69 max_slave_connections=100%
+
+			 75 [MaxAdmin Service]   #管理服务，不用修改
+			 76 type=service
+			 77 router=cli
+
+			 85 #[Read-Only Listener]     #不定义只读服务使用的端口
+			 86 #type=listener
+			 87 #service=Read-Only Service
+			 88 #protocol=MySQLClient
+			 89 #port=4008
+
+			 91 [Read-Write Listener]      #定义读写分离服务使用的端口
+			 92 type=listener
+			 93 service=Read-Write Service
+			 94 protocol=MySQLClient
+			 95 port=4006
+			 96 
+			 97 [MaxAdmin Listener]		 #定义管理服务使用的端口
+			 98 type=listener
+			 99 service=MaxAdmin Service
+			100 protocol=maxscaled
+			101 socket=default
+			102 port=4016            #手动添加端口，要确定定义端口没有被占用
+
+ 
+	根据配置文件做相应的配置 monitoruser和 scaluser
+		1. 在2台数据服务器上创建监控用户monitor 和 路由用户scaluser
+			在主库53上授权用户后，从库54上会同步主库上的数据
+ mysql> select user,host from mysql.user where user in ("monitoruser","scaluser");
+ mysql> grant replication slave, replication client on *.* to monitoruser@"%" identified by 
+                                                                                                        "123456";
+ mysql> grant select on mysql.* to scaluser@"%" identified by "123456";
+ mysql> select user,host from mysql.user where user in ("monitoruser","scaluser");
+
+		在57主机测试数据库的授权用户:
+			~]# mysql -h192.168.4.53 -umonitoruser -p123456
+			~]# mysql -h192.168.4.54 -umonitoruser -p123456
+			~]# mysql -h192.168.4.53 -uscaluser -p123456	 
+			~]# mysql -h192.168.4.54 -uscaluser -p123456
+		启动服务：
+			~]# ss -antulp |grep 4006
+			~]# ss -antulp |grep 4016  #没启动前查看端口是没有的
+			~]# maxscale -f /etc/maxscale.cnf  #启动maxscale服务
+			~]# ps -C maxscale  #查看进程
+			~]# netstat -antulp | grep maxscale  #查看端口
+
+		重启服务：
+			]# killall -9 maxscale   #直接杀死进程 ，停止服务
+			]# maxscale -f /etc/maxscale.cnf  #再次启动服务
+
+		在maxscale本机连接管理端口查看监控状态：进入管理界面
+		]# maxadmin -uadmin -pmariadb -P4016			
+		MaxScale> list servers
+
+
+	1.3 客户端测试：
+		1.3.1 在2台数据库服务器上添加客户端访问的连接用户
+			在主库上授权即可，从库会自动同步主库上的数据
+		mysql> create database db7;
+		mysql> create table db7.gg(id int);
+		mysql> grant select,insert on db7.* to game@"%" identified by "111111";
+		mysql> select host,user from mysql.user where user="game";
+
+		1.3.2 客户端50 mysql连接代理服务器192.168.4.57 查询数据或存储数据
+		]# mysql -h192.168.4.57 -P4006 -ugame -p111111
+		mysql> user db7;
+		mysql> insert into gg values(7777);
+		mysql> select * from db7.gg;
+
+		54从库：
+		mysql> insert into db7.gg values(9999999);  #客户端可以查看到从库上写入的数据即可验证
+
+
+二、mysql多实例
+	多实例：一台物理机上运行多个数据库服务；节约运维成本、提高硬件利用率
+	软件包：mysql-5.7.20-linux-glibc2.12-x86_64.tat.gz   #mysql-5.7不支持多实例
+ 配置步骤：
+	1）安装支持多实例服务的软件包
+	]# tar -xf mysql-5.7.20-linux-glibc2.12-x86_64.tat.gz
+	]# mv mysql-5.7.20-linux-glibc2.12-x86_64 /usr/local/mysql  #实验中移动后就相当于安装了
+
+	2）修改主配置文件
+	~]# vim /etc/my.cnf
+		[mysqld_multi]   #启用多实例
+		mysqld = /usr/local/mysql/bin/mysqld_safe      #指定进程文件路径
+		mysqladmin = /usr/local/mysql/bin/mysqladmin   #指定管理命令路径
+		user=root     #指定进程用户
+
+		[mysqld1]      #实例进程名称
+		datadir = /goodgame1      #数据库目录，要手动创建
+		socket = /goodgame1/mysqld1.sock   #指定sock文件的路径和名称
+		pid-file = /goodgame1/mysqld1.pid  #进程pid号文件位置
+		log-error = /goodgame1/mysql1.log  #错误日志文件
+		port = 3307				    #端口号
+
+		[mysqld2]
+		datadir = /goodgame2
+		socket = /goodgame2/mysqld2.sock
+		pid-file = /goodgame2/mysqld2.pid
+		log-error = /goodgame2/mysql2.log
+		port= 3308      
+
+	]# mkdir /goodgame1     #创建数据库目录
+	]# mkdir /goodgame2
+	]# chown mysql:mysql /goodgame*
+
+	3）初始化授权库(启动服务的时候就会自动做初始化操作)
+	]# /usr/local/mysql/bin/mysqld  --user=mysql --basedir=/usr/local/mysql
+		--datadir=/goodgame1 --initialize
+	4）启动服务
+	]# /usr/local/mysql/bin/mysqld_multi start 实例编号（1）  #会生成一个初始密码
+
+	]# /usr/local/mysql/bin/mysqld_multi --user=root --password=密码 stop 实例编号
+	5）客户端访问测试
+	]# /usr/local/mysql/bin/mysql -uroot -p初始密码 -S sock文件
+	mysql> alter user user() identified by "新密码";
+	mysql> alter user root@"localhost" identified by "新密码";
+
+客户端访问数据库，希望数据存放在编号为2的数据库里：授权
+ 	50上的2数据库：
+	mysql> grant all on db7.* to admin@"%" identified by "111111";
+	
+	
+
+
+
+
+三、mysql性能调优(周五讲)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

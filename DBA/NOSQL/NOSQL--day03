@@ -1,0 +1,331 @@
+2019-03-27
+
+windows 连接 windows命令：mstsc
+########################################################################################
+主从复制工作原理:
+	1)slave向master发送sync命令
+	2)master启动后台存盘进程,并收集所有修改数据命令
+	3)master完成后台存盘后,传送整个数据文件到slave
+	4)slave接收数据文件,加载到内存中完成首次完全同步
+	5)后续有新数据产生时,master继续将新的数据收集到的修改命令依次传给slave.完成同步
+主从复制缺点:
+	网络繁忙,会产生数据同步延时问题
+	系统繁忙,会产生数据同步延时问题
+
+一  配置redis主从复制：
+     redis服务启动后，默认都是主库
+        ]# redis-cli -h IP地址  -p 端口
+        > info replication  #查看主从配置信息
+
+  1.1 配置从库：52
+	> SLAVEOF 主库IP地址 端口号
+      > SLAVEOF 192.168.4.51 6351  #将52 设置为51的从库，命令行设置，临时有效，重启失效
+	> info replication  #查看主从配置信息
+		....
+	    role:slave
+		....
+	    slave_read_only:1
+		....
+	> SLAVEOF no one   #取消从库属性，将从库还原为主库  ===>反客为主
+
+  1.2 修改配置文件指定主库 : 永久生效
+	]# vim /etc/redis/6352.conf
+	  ........
+		282 slaveof 192.168.4.51 6351
+		#282 slaveof 主库IP  主库端口
+	]# /etc/init.d/redis_6370 stop
+	]# /etc/init.d/redis_6370 start  #重启服务生效
+
+  1.3 有验证的主从配置---52 从库  51 主库
+	主库redis服务设置连接密码是123456     --------------一主多从
+		]# vim /etc/redis/6352.conf
+		     .......
+		  requirepass  123456
+		]# /etc/init.d/redis_6351 start
+	从库在配置文件里指定连接主库的密码 然后重启服务
+		]# /etc/init.d/redis_6370 stop
+		]# vim /etc/redis/6352.conf
+		    ...............                      **:从库自能查看数据,而不能存储数据
+		  289  masterauth 123456
+		]# /etc/init.d/redis_6370 start
+
+   1.4 将53 主机设置为51 的从库 : 
+	修改主配置文件/etc/redis/6353.conf 指定主库的ip地址和端口 以及主库密码
+		]# vim /etc/redis/6352.conf
+	  		........
+		282 slaveof 192.168.4.51 6351  #指定主库是那个主机
+		289  masterauth 123456  #指定主库密码
+		]# /etc/init.d/redis_6370 start
+  1.5 将主机54 永久配置为53 的从库 : 主从从结构
+		]# vim /etc/redis/6352.conf
+			.......
+		282 slaveof 192.168.4.51 6351  #因为53 主机没有设置连接密码,故不用指定主库密码
+		]# /etc/init.d/redis_6370 start
+
+  1.6 哨兵模式: 可以部署在出主库服务器外的任意一台机器 
+	监视主从复制结构中的主库,当发现主库连接不上时,自动在其从库中选取一台作为新的主库
+	1) 主机宕机后,从库自动升级为主库 ----程序自动找谁是主库,然后自动连接
+	2) 在slave主机编辑sentinel.conf文件
+	3) 在slave主机运行哨兵程序
+	________________________#实验采用55 主机最为哨兵服务
+配置哨兵模式:
+	1 创建服务的主配置文件
+		在/root/soft/redis/redis-4.0.8/下,有sentinel.conf模板文件
+[root@mysql-55 ~]# vim /etc/sentinel.conf  #创建并修改sentinel.conf配置文件
+	   bind 0.0.0.0   #在本机所有网卡发出监控信息
+	   sentinel monitor  redis51 192.168.4.51 6351 1
+	   sentinel auth-pass redis51 123456  
+___________________________________________________
+	#sentinel monitor 主机名 ip地址  端口 票数
+	主机名:自定义
+	ip地址:master主机的ip地址
+	端  口:master主机的redis服务使用的端口
+	票  数:有几台哨兵主机连接不上主库时,切换主库
+_____________________________________________________
+	2 启动哨兵服务
+	~]# redis-sentinel /etc/sentinel.conf
+
+	3 测试配置
+	      1) 停止当前主库的redis服务
+	      ~]# /etc/init.d/redis_6351 stop
+
+	      2) 检查对应从库的复制信息
+		> info replication
+
+
+二  RDB/AOF 持久化 (把内存里的数据保存到硬盘)
+    2.1 RDB
+	2.1.1 RDB介绍 (redis database)
+	    1) 数据持久化方式之一
+	    2) 按照指定时间间隔,将内存中的数据集快照(snapshot)写入硬盘
+	#redis数据存放在/var/lib/redis/6379/dump.rdb中
+	    3) 恢复时,将快照文件直接读入内存
++++++++++++++++++++++++++++++++++++++++++++++++++++++
+	相关配置参数:
+	   dbfilename  "dump.rdb"  #文件名
+	   save ""  #禁用RDB   默认是注释的
+	数据从内存保存到硬盘的频率:
+	   save  900  1    #900秒内且有1次修改,就保存到硬盘
+	   save  300  10   #300秒内且有10次修改,就保存到硬盘
+	   save  60  10000 #60秒内且有10000次修改,就保存到硬盘
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+   2.2.2 使用备份的dump.rdb文件恢复数据
+	50主机备份:
+	   ]# cp /var/lib/redis/6379/dump.rdb /opt/
+	   ]# scp /opt/dump.rdb 192.168.4.56:/opt/  #将50主机的备份拷贝到56主机的/opt下
+
+	56主机恢复: 恢复后56主机的数据与50主机数据一样
+	   ]# /etc/init.d/redis_6379 stop     #停止redis服务
+	   ]# rm -rf /var/lib/redis/6379/*    #清空数据库目录
+	   ]# cp /opt/dump.rdb /var/lib/redis/6379/  #将备份文件导入数据库目录
+	   ]# /etc/init.d/redis_6379 start    #启动redis服务
+	   ]# redis-cli -h 192.168.4.56 -p 6356  #连接redis查看,数据与50一致
+
+RDB优点/缺点:
+	1) 高性能的持久化实现-----创建一个子进程来执行持久化,先将数据写入临时文件,
+持久化过程结束后,再用这个临时文件替换上次持久化好的文件;过程中主进程不做任何IO操作.
+	2) 比较合适大规模数据恢复,且对数据完整性要求不是非常高的场合
+缺点:
+	意外宕机时,最后一次持久化的数据会丢失.
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+当数据库使用了很长的一段时间后，用的是RDB，想要开启AOF（丢失最后一秒的数据）：
+不能直接在配置文件里开启：appendonly yes，要在命令行中开启：
+	]# redis-cli -h 192.168.4.50 -p 6350 -a 123456 #连接redis,存入数据
+	> CONFIG SET appendonly yes #修改，开启aof模式
+	> CONFIG REWRITE  #将命令行的命令写入配置文件
+   #这样开启，原来RDB中的数据就不会被覆盖
+******************************************************************************************
+
+
+ 
+    2.2 持久化之AOF:为了弥补RDB的缺点
+	介绍:
+	只做追加操作的文件,Append Only File
+	记录redis服务所有写操作
+	不断的将新的写操作,追加到文件的末尾
+	使用cat命令可以查看文件内容
+
+	启用AOF:
+	]# /etc/init.d/redis_6379 stop 
+	]# vim /etc/redis/6379.conf 
+		......
+	 673 appendonly yes  #启用AOF 默认是不启用的
+	 677 appendfilename "appendonly.aof"  #指定文件名
+	]# /etc/init.d/redis_6379 stop
+	]# /etc/init.d/redis_6379 start
+	]# redis-cli -h 192.168.4.50 -p 6350 -a 123456 #连接redis,存入数据
+	]# cat /var/lib/redis/6350/appendonly.aof  #记录写操作
+
+   RDB和AOF 同时启用时,会先加载appendonly.aof文件,会覆盖RDB的文件;
+需要开AOF时,要先将有原来数据的dump.rdb文件拷贝走;或者当dump.rdb文件数据内容为空时,可同时开启.
+生产环境中两个一起开启.
+
+相关配置参数:
+
+ 1) AOF文件记录写操作的方式:
+	appendfsync always   #有新写操作立即记录(同时将数据存进硬盘中)
+	appendfsync everysec #每秒记录一次(同时将数据存进硬盘中)----默认就是这个
+	appendfsync no	  #从不记录(记录写操作,但不会立即将对应数据存进硬盘)
+
+ 2) 日志文件会不断增大,何时出发日志重写?
+	1. redis会记录上次重写时AOF文件的大小
+	2.  默认配置aof文件是上次rewrite后大小的1倍,且文件大与64M时触发.
+	> auto-aof-rewrite-percentage 100  #第二次瘦身是当达到原来的1倍的时候
+	> auto-aof-rewrite-min-siz 64mb    #默认最小是64M
+
+ 3) 修复AOF 文件 
+   把文件恢复到最后一次的正确操作
+	]# redis-check-aof  --fix appendonly.aof
+
+使用AOF文件恢复数据:
+     备份数据:
+        50主机备份appendonly.aof文件到其他位置
+	  ]# cp /var/lib/redis/6350/appendonly.aof  /root/
+	  ]# scp /root/appendonly.aof 192.168.4.56:/root
+     恢复数据:
+	 56主机上恢复数据(与50主机上的数据一样)
+	  ]# /etc/init.d/redis_6379 stop
+	  ]# cp /root/appendonly.aof /var/lib/redis/6356/
+	#要修改配置文件启用aof
+	  ]# /etc/init.d/redis_6379 start
+	  ]# redis-cli -h 192.168.4.56 -p 6356  #恢复50主机上的数据
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+位
+1m = 1024k
+1k = 1024字节
+1字节 = 8位  11111111
+一个字符= 1字节
+
+
+
+Redis 数据类型:sting、list、
+1. String字符串管理命令:
+	1) set key value [ex seconds] [px milliseconds] [nx|xx]
+	  #设置key和值,过期时间可是使用秒或毫秒为单位 nx-变量不存在才修改 xx-强制修改
+	2) setrange key offset value
+	  #从偏移量开始复写key的特定位的值
+	3) strlen key  #统计字串的长度
+	4) append key value
+	  #变量key存在则追加,不存在则创建key及value,返回key长度
+	5) setbit key offset value  #位存储,节省空间
+	   #对key所存储字串,设置或清除特定偏移量上的位(bit)
+	  #value值可以为 1 或 0,offset为0~2^23之间
+	  #key不存在,则创建新key  
+	6) bitcount key  #统计字串中设置为 1 的比特位数量
+	7) decr key #将key中的值减 1,key不存在则先初始化为0,再减 1
+	8) decrby key 30  #将key中的值,减去30
+	9) get key #返回key存储的字符串值,若key不存在则返回null
+		      #若key的值不是字串,则返回错误,get只能处理字串
+	10) getrange key start end 
+		#返回字串值中的子字串,截取范围为start和end
+		#负数偏移量表示从末尾开始计数,-1表示最后一个字符,-2表示倒数第二个字符
+	11) incr key #将key的值加1,如果key不存在,则初始化为0后再加1;主要应用为计数器
+	12) incrby key increment #将key的值增加increment
+	13) incrbyfloat key increment #为key中所储存的值加上浮点数增量 increment
+	14) mget key [key..] #获取一个或多个key的值,空格分隔,具有原子性
+	15) mset key value [key value..] #设置多个key及值,空格分隔,具有原子性
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+> setbit peter 100 1  #网站上线100天用户登陆了一次
+> setbit peter 105 1  #网站上线105天用户登陆了一次
+场景说明:
+	记录网站用户上线频率,如果A上线了多少天等类似的数据; 如用户在某天上线,则使用setbit,以用户名为key,将网站上线日为offset,并在该offset上设置1,最后计算用户总上线次数时,使用bitcount用户名即可,这样,即使网站运行10年,每个客户仅占用10*365比特位即456字节.
+
+————————————————————————————————————————————————————
+2. List列表
+	list列表简介：
+	1）Redis的list是一个字符列队
+	2）先进后出
+	3）一个key可以有多个值
+
+list列表操作命令：
+	a）lpush key value [value...] #将一个或多个值插入到列表key的表头，key不存在，则创建key
+	b）lrange key start stop  #从开始位置读取key的值到stop结束
+		> lrange list 0 2  #输出0 1 2共三位
+		> lrante list 0 -1 #输出所有	
+		> lrange list 0 -2 #从开始读到倒数第二位为止
+	c）lpop key  #删除列表头元素，也就是最后存入的值；key不存在则返回nil
+	d）llen key  #统计列表key的长度（个数）
+	e）lindex key index  #输出列表中的一个值，index填下标
+		>  lindex good -2  #输出列表中倒数第二个值
+	f）lset key index value  #修改列表中的某个值
+		> lset good 2 goodgame #将列表中第三个值修改位goodgame
+	g）rpush key value1 value2..  #将值插入到列表的末尾
+	h）rpop key  #删除并返回key末尾的值
+
+**************************************************************************
+
+3. Hash表
+    Redis hash
+	1）是一个string类型的field和value的映射表
+	2）一个key可对应多个field，一个field对应一个value
+	3）将一个对象存储为hash类型，校于每个字段都存储成string类型更能节省内存
+
+hash表操作命令：
+	1）hset key field value  #将hash表中field值设置为value
+		> hset site google 'www.g.cn'
+		> hset site baidu 'wwww.baidu.com'
+	2）hget key field   #获取hash表中field的值
+		> hget site baidu
+	3）hmset key field value1 field value2..#同时给hash表中的多个field赋值
+		> hmset site goole www.g.cn baidu www.baidu.com
+	4）hmget key field1 field2.. #输出hash表中多个field的值
+		> hmget site goole baidu
+	5）hkeys key  #输出hash表中所有field名称
+		> hkeys site
+	6）hgetall key #输出所有的key-vfield
+		> hgetall site
+	7）hvals key   #输出hash表中所有key的值
+		> hvals site
+	8）hdel key field.. #删除hash表中多个field，不存在则忽略
+		> hdel site google
+
+注意：
+      > s <tab> --查看string命令的帮助
+      > l <tab> --查看list命令的帮助
+	> h <tab> --查看hash命令的帮助
+
+
+    在redis服务器命令行中执行的flushall、等命令也会保存到appendonly.aof中，
+恢复数据时，要将appendonly.aof文件中的flushall等删除命令去掉
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

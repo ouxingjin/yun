@@ -1,0 +1,390 @@
+2019-03-22
+
+#####################################################################################
+明天环境准备： 一共5台主机
+	客户端 192.168.4.50   不需要数据库服务
+	分片服务器 192.168.4.57  需要的软件包：Mycat-server-1.6...  不需要数据库服务
+	数据库服务器 192.168.4.53/54/55 （还原为独立的数据库服务器、只保留初始的4个库）
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+	单表过大会有什么影响？
+	如何解决单表过大的问题？
+
+	1.1 数据分片介绍
+分库分表：将存放在一个数据库（主机）中的数据，按照特定方式进行拆分，分散存放到
+	  多个数据库（主机）中，以达到分散单台设备负载的效果
+
+垂直分割：
+    纵向切割：将单个表，拆分成多个表，分散到不同的数据库
+		将单个数据库的多个表进行分类，按业务类别分散到不同的数据库上
+
+水平分割：
+   横向切割：按照表中某个字段的某种规则，把表中的许多记录按行切分，分散到多个数据库中
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+	]# rpm -qa 
+
+
+一、数据分片
+	1.1  数据分片介绍
+	1.2 数据分片方式
+	1.3 Mycat软件介绍
+	1.4 拓扑结构
+	1.5 环境准备
+	1.6 配置mycat服务
+		1.6.1 安装提供服务的软件包mucat
+		]# cd /root/soft/mysql
+		]# rpm -qa | grep -i jdk
+		]# rpm -q java-1.8.0-openjdk
+		]# tar -xf Mycat-server-1.6-RELEASE-20161028204710-linux.tar.gz
+		]# mv mycat /usr/local/mycat/
+		]# ls /usr/local/mycat/
+		bin  catlet  conf  lib  logs  version.txt
+		+++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		bin：mycat命令，如 启动 停止 等
+		catle：扩张功能
+		conf：配置文件
+		lib：mycat使用的jar
+		log：mycat启动日志和运行日志
+		wrapper.log：mycat服务启动日志
+		myat.log：记录SQL脚本执行后的报错内容
+
+		重要配置文件：
+		server.xml  设置连mycat的账户信息
+		schema.xml 配置mycat的真实库表
+		rule.xml  定义mycat分片规则
+		++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+		]# java -version  # 查看版本信息
+
+	1.6.2 修改配置文件
+		1.6.2.1 定义客户端连接使用的用户名及密码和数据库	
+		[root@mysql-57 mycat]# cp conf/server.xml  /root/ #备份重要文件
+		]# vim /usr/local/mycat/conf/server.xml  (使用默认)
+
+		1.6.2.2 配置数据分片
+		[root@mysql-57 mycat]# cp conf/schema.xml /root/
+		]# sed -i '56,77d' schema.xml  #将连续的注释代码删除
+		]# sed -i '39,42d' schema.xm
+		]# vim /usr/local/mycat/conf/schema.xml  #手动删除注释行 <!-- -->
+配置标签说明:
+<schema>....</schema>  	#指定分片的表
+
+<dataNode ........ />	#指定存储数据使用的库
+	
+<dataHost> .....</dataHost>  #指定数据库服务器的ip地址
+
+
+		1.6.2.3 根据配置文件的设置在数据库服务器上做对应的配置
+		   1. 创建存储数据的库
+			53 mysql> create database db1;
+			54 mysql> create database db2;
+			55 mysql> create database db3;
+
+		   2. 在所有数据库服务器上创建授权用户: 53 54 55
+			mysql> grant all on *.* to harry@"%" identified by "123qqq...A";
+
+		   3 在mycat 服务器上测试授权用户
+			mysql> mysql -h192.168.4.53  -uharry -p123qqq...A db1
+
+		1.6.3 启动服务
+			]# /usr/local/mycat/bin/mycat start  #开启服务
+			]# /usr/local/myscat/bin/mycat stop  #停止服务
+			]# ls /usr/local/mycat/logs/
+			]# ps -C java   			#查看进程
+			]# ss -antulp |grep 8066       #查看端口
+	
+
+		排错：  ]# tail -f /usr/local/mycat/logs/wrapper.log  #动态查看报错日志，另开一个终端启动服务
+			]# /usr/local/mycat/bin/mycat start  #开启服务，
+
+	1.7 测试配置
+		1.7.1 在客户端50 主机连接mycat 服务器
+		[root@mysql-50 ~]# mysql -h192.168.4.57 -P8066 -uroot -p123456 TESTDB  #server.xml 中定义的root用户和密码
+		mysql> show databases;
+		mysql> use TESTDB;
+		mysql> show tables;  #看到的表都是不存在的，
+		mysql> desc goods;   #会报错
+		ERROR 1146 (42S02): Table 'db2.goods' doesn't exist
+
+	57主机：
+		]# /usr/local/myscat/bin/mycat stop  #停止服务
+		]# vim /usr/local/myscat/conf/partition-hash-int.txt
+			10000=0
+			10010=1
+			10020=2
+		]# /usr/local/mycat/bin/mycat start  #开启服务
+
+	50主机;
+		]# mysql -h192.168.4.57 -P8066 -uroot -p123456 TESTDB  #连接分片服务器，进入到TESTDB库
+		mysql> use TESTDB;
+		mysql> create table employee(
+		    -> ID int primary key auto_increment,
+		    -> sharding_id int,
+		    -> name char(20),
+		    -> sex enum("boy","girl"),
+		    -> pay float(7,2)
+		     -> );
+		mysql> desc employee;
+
+	测试：53 54 55 数据库上对应的db1、db2、db3 库中有employee表	
+	枚举分片规则，存储数据：
+		mysql> insert into employee(sharding_id,name,sex,pay)
+			values(10000,"tom","boy",20000);  		#存放在db1数据库中
+		mysql> insert into employee(sharding_id,name,sex,pay)
+			values(10010,"jerry","girl",25000);  	#存放在db2数据库中
+		mysql> insert into employee(sharding_id,name,sex,pay)
+			values(10020,"sarah","girl",28000);  	#存放在db3数据库中
+
+*********************************************************************************************************
+
+	1.8 在mycat服务器上添加新库、新表
+		1.8.1 修改服务的主配置文件
+			]# vim /usr/local/mycat/conf/server.xml
+<user name="root">
+                <property name="password">123456</property>
+                <property name="schemas">TESTDB,good</property>  #自定义数据库名
+	
+			]# vim /usr/local/mycat/conf/schema.xml   #一个<schema>...</schema> 就是一个库
+        <schema name="good" checkSQLschema="false" sqlMaxLimit="100">
+                <table name="student" primaryKey="ID" dataNode="dn1,dn2,dn3"   #表student 分片
+                           rule="sharding-by-intfile"/>
+                <table name="company" primaryKey="ID" type="global" dataNode="dn1,dn2,dn3" />  #表cpmpany全局
+        </schema>
+	
+		1.8.2 重启服务
+			]# /usr/local/mycat/bin/mycat stop
+			]# /usr/local/mycat/bin/mycat start
+			]# ss -antulp |grep 8066
+	
+		1.8.3 客户端访问服务器测试：
+			mysql> use student ;
+			mysql>  create table student(ID int primary key auto_increment ,sharding_id int , cname char(10));
+
+
+
+
+————————————————————————————————————————————————————————
+ID
+sharding_id
+10000 ----> dn1 mysql-53 192.168.4.53 db1
+10010 ----> dn2 mysql-54 192.168.4.54 db2
+——————————————————————————————————————————————————————————
+
+
+二、mysql性能优化
+	2.1 导致数据库服务处理速度慢的原因有那么写？
+		服务器硬件配置低： cup 、 memory  disk
+				 
+
+	数据库服务
+
+		mysql> show variables;
+		mysql> show variables like "%inlog%";
+	查看状态：
+		mysql> show global status;
+		mysql> show global status like "%time%";
+
+	与服务性能相关的常用参数配置：
+1）并发连接控制：
+		mysql> show variables like "max_connections";  #查看默认的最大连接数15
+		mysql> set global max_connections=200; 修改最大连接数
+		[]# vim /ect/my.cnf
+			max_connections=200  #写在配置文件，永久设置，需要重启服务
+
+2）查询曾经有过的最大连接数/并发连接数=0.85：
+		mysql> show global status like "max_used_connections"; #曾经有过的最大连接数
+			1000/x=0.85 ==> 并发连接数x=
+
+3）连接超时时间： connect_timeout 默认为 10s:建立连接的三次握手时间不能过短，会导致cup繁忙；一般不改
+		mysql> show global variables like "connect_timeout";	
+			+-----------------+-------+
+			| Variable_name   | Value |
+			+-----------------+-------+
+			| connect_timeout | 10    |
+			+-----------------+-------+
+4）等待断开连接时间：wait_timeout; 等待关闭连接的不活动超时秒数
+	建立连接后多长时间不执行SQL命令，就会断开连接，默认28800秒（8小时）
+	若是时间太短，会导致客户端写入的数据不完整
+		mysql> show variables like "wait_timeout";
+
+缓存参数控制：
+1） key_buffer_size ：用于MyISAM引擎的关键索引缓存大小（拿出多大内存放置排队信息）
+	普通索引  index （给字段的值排队）
+	mysql> show variables like "key_buffer_size"; #默认8M，可以适当加大此缓存值
+		+-----------------+---------+------------------+
+		| Variable_name   | Value   |
+		+-----------------+---------+------------------+   默认存放在内存，当内存里没有数据时，会从表中
+		| key_buffer_size | 8388608 |	 进行查询（变为从硬盘中查询）
+		+-----------------+---------+------------------+
+	mysql> set global key_buffer_size=838860800; (默认单位是字节）
+
+2） sort_buffer_size :为每个要排序的线程分配此大小的缓存空间
+	增大此值可提高ORDER和GROUP的速度
+	mysql> show variables like "sort_buffer_size";
+
+3） read_buffer_size :为顺序读取表记录保留的缓存大小
+	此缓存值影响SQL查询的响应速度
+	mysql> show variables like "read_%_size";
+
+4） thread_cache_size：允许保存在缓存中被重用的线程数量
+	mysql> show variables like "thread_%_size";  #查看可重用线程数
+		+-------------------+-------+
+		| Variable_name     | Value |
+		+-------------------+-------+
+		| thread_cache_size | 9     |
+		+-------------------+-------+
+	mysql> show global status like "threads_%";  #查看当前重用线程状态
+		+-------------------+-------+
+		| Variable_name     | Value |
+		+-------------------+-------+
+		| Threads_cached    | 0     |
+		| Threads_connected | 9     |
+		| Threads_created   | 9     |
+		| Threads_running   | 1     |
+		+-------------------+-------+
+5） table_open_cache ：为所有线程缓存的打开的表的数量
+    mysql> show global status like "Open_%tables"; #查看已打开、打开过多少个表
+    mysql> show variables like "table_open_cache"; #查看可缓存多少个打开的表
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+	2.2 SQL查询优化
+类型     	     用途				配置
+错误日志： 记录启动/运行/停止过程中的错误消息     log-error[=name]
+查询日志：记录客户端连接和查询操作		      general-log  / general-log-file=
+慢查询日志：记录耗时较长或者不使用索引的查询操作   slow-query-log
+						     slow-query-log-file=
+						     slow-query-time=	默认为 10s
+***************************************************************************************
+2.2.1 启动日志文件记录客户端连接服务器后执行的sql命令
+	1）查询日志文件：记录执行的所有SQL命令
+		[]# vim /etc/my.cnf
+		   [mysqld]
+		   general-log  #开启查询日志
+		    ...
+		]# tail -f /var/lib/mysql/主机名.log  #动态查看日志
+	2） 慢查询日志文件：记录超过指定时间显示查询结果的SQL命令
+		[]# vim /etc/my.cnf
+		    [mysqld]
+		      slow-query-log
+			log-queries-not-using-indexes  #没有使用索引
+
+		]# tail -f /var/lib/mysql/mysql-52-slow.log
+		mysql> select * from mysql.user;
+		mysql> select sleep(12);    #超时
+
+   ]# mysqldumpslow /var/lib/mysql/主机名-slow.log >/root/sql.txt #查看慢查询日志
+**********************************************************************************
+记录慢查询;
+	选项			含义
+slow-query-log      	启用慢查询
+slow-query-log-file	指定慢查询日志文件
+long-query-time		超过时间（默认10秒）
+log--queries-not-using-indexes  记录为使用索引的查询
+************************************************************************************
+	查看缓存的大小：
+	mysql> show variables like "query_cache%";  #与查询缓存相关的
+		+------------------------------+---------+----------------------------
+		| Variable_name                | Value   |  有专门提供缓存的服务器
+		+------------------------------+---------+-----------------------------
+		| query_cache_limit            | 1048576 |
+		| query_cache_min_res_unit     | 4096    |
+		| query_cache_size             | 1048576 |
+		| query_cache_type             | OFF     |#查询缓存默认没有开
+		| query_cache_wlock_invalidate | OFF     |
+		+------------------------------+---------+---------------------------
+
+	3) 查看数据库服务器当前的查询缓存的统计信息：
+		mysql> show global status like "Qcache_%";
+		+-------------------------+---------+
+		| Variable_name           | Value   |
+		+-------------------------+---------+
+		| Qcache_free_blocks      | 1       |
+		| Qcache_free_memory      | 1031832 |
+		| Qcache_hits      #在查询缓存里查找到的数据的次数（查找到一此，自动加 1）
+		| Qcache_inserts   #在查询缓存里查找数据的次数
+		| Qcache_lowmem_prunes    | 0       |
+		| Qcache_not_cached       | 3       |
+		| Qcache_queries_in_cache | 0       |
+		| Qcache_total_blocks     | 1       |
+		+-------------------------+---------+
+
+	2.4 优化数据存储架构  （查看是否有数据传输瓶颈、和单点故障）
+
+	2.5 检测网络流量（带宽）
+
+*********************************************************************************************
+调优思路总结：
+   手段			具体操作
+1. 升级硬件			CUP、内存、硬盘
+2. 加大网络带宽        	付费加大带宽
+3. 调整mysql服务运行参数	并发连接数、连接超时时间、重复使用的线程数...
+4. 调整与查询相关的参数	查询缓存、索引缓存
+6. 启用慢查询日志		slow-query-log
+7. 网络架构不合理		调整网络架构 
+
+**********************************************************************************
+
+
+mongodb
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

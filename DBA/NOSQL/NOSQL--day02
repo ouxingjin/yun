@@ -1,0 +1,214 @@
+2019-03-26
+
+###################################################################################
+一、部署redis集群
+   1.1 环境准备 
+	ip地址规划
+		redis 服务器        ip地址 及 端口规划
+			redisA  192.168.4.51  6351
+			redisB  192.168.4.52  6352
+			redisC  192.168.4.53  6353
+			redisD  192.168.4.54  6354
+			redisE  192.168.4.55  6355
+			redisF  192.168.4.56  6356
+		不能有数据===>连接数据库，执行flushall，并保存。
+		只允许eth0接收请求
+   1.2 启用集群 (6台redis服务分别启用集群模式)
+	]# vim /etc/redis/端口.conf
+		........
+		port 端口
+		bind IP地址 
+	815  cluster-enabled yes    #启用集群
+	823  cluster-config-file nodes-6356.conf  #指定集群信息文件
+	829  cluster-node-timeout 5000    #请求超时时间 5秒
+
+	]# /etc/init.d/redis_6351 stop   #脚本停止redis服务
+	]# /etc/init.d/redis_6351 start  #脚本开启redis服务        集群通信端口
+	]# ss -anutlp |grep redis-server #查看端口信息，会多出一个端口+10000的端口
+
+查看集群信息：
+	]# redis-cli -h 192.168.4.51 -p 6351
+	  > cluster info  #
+	  > cluster nodes
+
+   1.3 配置管理主机：51作管理主机和集群主机
+	软件包在/root/soft/redis-cluster中
+	]# yum -y install ruby rubygems 
+	]# yum -y install ruby-devel-2.0.0.648-30.el7.x86_64.rpm
+	]# which gem
+	]# gem install redis-3.2.1.gem
+
+	]# cd redis-4.0.8/src
+	]# echo $PATH   #查看
+	]# mkdir /root/bin
+	]# cp redis-trib.rb /root/bin   #放入该目录下，可以像系统命令一样使用
+	]# chmod +x /root/bin/redis-trib.rb
+	]# redis-trib.rb help   #查看用法的帮助信息
+
+   1.4 创建集群：51
+	]# cd /root/soft/redis/redis-4.0.8/src
+	]# redis-trib.rb create --replicas 1 \
+	    > 192.168.4.51:6351 192.168.4.52:6352 \
+	    > 192.168.4.53:6353 192.168.4.54:6354 \
+	    > 192.168.4.55:6355 192.168.4.56:6356
+    # 创建集群，由于redis会自动选取3台主机作为主库，因此6台主机的集群， --replicas后面从库的个数只能是 1，从库的个数决定了集群主机的总台数
+	]# redis-cli -h 192.168.4.51 -p 6351
+	   > cluster info	 #查看集群信息
+	   > cluster nodes  #查看集群节点信息
+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+集群创建不成功： 配置文件要顶格
+排错：	1）检查完配置文件后，
+	2）要清空数据库目录:rm -rf /var/lib/6379/*，执行过创建集群命令后，数据会保存再此目录下的
+                       nodes-端口.conf文件中，要删除掉
+	3）再重启redis服务；
+     	4）再执行创建集群的命令
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+   1.5 测试集群：
+	再客户端访问任意一台master主机存数据
+	]# redis-cli -c -h IP地址  -p 端口
+		#每个从库会自动同步对应主库的数据
+		#高可用：当主库down机后，对应的从库会自动升级为主库
+		#原master主机启动后，会自动配置为当前master的从库
+
+存取数据都是访问主库
+————————————————————————————————————————————————
+二、集群工作原理：
+	槽solts的个数：0～16383（共16384个）三个主库均分这些槽，每个主库5461个
+	master1：0-5460
+	master2：5461-10922
+	master3：10923-10683
+
+    当存取数据的时候，会调用crc16算法做计算 得出一个数字，
+这个数字%16384 取余=>得出一个值，看这个余数在那个主客的haxi槽的范围内，就往那个主库存数据
+————————————————————————————————————————————————
+三、管理集群：
+	]# redis-trib.rb check IP地址:端口    #检测集群 S从库、M主库有hash槽（slots）
+	]# redis-trib.rb info IP地址:端口     #检测信息
+	192.168.4.51:6351 (80558a34...) -> 1 keys | 5461 slots | 1 slaves.
+	192.168.4.53:6353 (9e814611...) -> 2 keys | 5461 slots | 1 slaves.
+	192.168.4.52:6352 (58935e64...) -> 2 keys | 5462 slots | 1 slaves.
+	[OK] 5 keys in 3 masters.
+	0.00 keys per slot on average.
+
+3.1 向集群中添加新redis服务器
+	3.1.1  添加作为主库（把redis服务器57添加到集群里作主库）
+	    1）运行redis服务且启用了集群模式  且本机没有数据
+		]# vim /etc/redis/6357.conf
+			......
+		815  cluster-enabled yes    #启用集群
+		823  cluster-config-file nodes-6356.conf  #指定集群信息文件
+		829  cluster-node-timeout 5000    #请求超时时间 5秒
+		]# rmrf /var/lib/redis/6357/*
+		]# /etc/init.d/redis_6357 stop
+		]# /etc/init.d/redis_6357 start
+
+	    2）在管理主机51 上作如下配置
+		2.1 添加新主机，
+		  ]# redis-trib.rb add-node 192.168.4.57:6357  192.168.4.51:6351
+		#将57添加到集群中，集群中的任何一台机器都可以代表整个集群，所以后面写51-56的IP和端口都可以
+		  ]# redis-trib.rb check 192.168.4.51:635
+
+	----->	2.2 分配 hash slots
+		   ]# redis-trib.rb reshard 192.168.4.51:6351  #51代表的是集群
+			> 指定移除hash槽个数 ：4096
+			> 指定接收hash槽主机ID： #由redis-trib.rb check 192.168.4.51:635 查出
+			> 指定移出hash槽主机ID：all  #从前三个主库的槽中提取分配
+			> yes   #确认使用该分配
+
+	3.1.2  添加作为从库（把redis服务器58 添加到集群里作为57 的从库）
+		1）58运行redis服务且启用了集群模式，本机不能有数据
+
+		2）在管理主机51 上做如下配置：
+		    2.1 添加主机
+	]# redis-trib.rb add-node --slave [--master-id id值] ip地址:端口 192.168.4.51：6351   
+		#不指定主节点的id的话，会把新节点随机添加为从库最少的主库的从库
+
+		    2.2 查看集群信息
+		]# redis-trib.rb check 192.168.4.55:6355
+		]# redis-trib.rb info 192.168.4.55:6355
+
+		   2.3 客户端50 连接主库57 存储数据
+			客户端50 连接从库58 查看数据
+		 ]# redis-cli -c -h 192.168.4.57 -p 6357  #要加选项 -c
+		 ]# redis-cli -c -h 192.168.4.58 -p 6358 
+——————————————————————————————————————————————————————————
+	3.2 从集群中移除redis服务器（都是在管理主机上操作）
+		3.2.1 移除从库（**没有hash slots，可以直接删除**）
+		]# redis-trib.rb del-node  IP:端口  主机ID值
+[root@mysql-51 src]# redis-trib.rb del-node 192.168.4.58:6358  移除主机ID
+>>> Removing node db01566e659c4a30c60fabd89e9e260b5e6bf9ac from cluster 192.168.4.58:6358 #指集群
+>>> Sending CLUSTER FORGET messages to the cluster...
+>>> SHUTDOWN the node.	#自动关闭服务
+		]# redis-trib.rb check 192.168.4.51:6351
+		]# redis-trib.rb info 192.168.4.51:6351
+
+		3.2.2 移除主库（**有hash槽，不能直接删除**）
+		   1）重新分片释放占用的hash槽
+		]# redis-trib.rb reshard 192.168.4.51:6351
+			> 指定移除hash槽个数 ：4096
+			> 指定接收hash槽主机ID： 51的ID  #接收hash槽的主机ID
+			> Source node #1: 57的ID      #释放hash槽的主机ID
+			> Source node #2:done         #结束
+			> yes   #确认使用该分配
+		
+		]# redis-trib.rb check 192.168.4.51:6351  #查看集群，57主机上的hash slots为0
+
+		   2）移除master主机
+		]# redis-trib.rb del-node 192.168.4.51:6351  移除master主机ID
+>>> Removing node 825bd6d425d94050bc2bcc3f5f925c1f8a7c9f5e from cluster 192.168.4.51:6351
+>>> Sending CLUSTER FORGET messages to the cluster...
+>>> SHUTDOWN the node.		
+
+
+  >>把故障移除的主机再添加到集群里：（把57再添加回来）
+	1）启动redis服务（57 主机）
+	  ]# /etc/init.d/redis_6379 start   #移除的时候自动关闭了redis服务，需要重新开启
+	  ]# redis-cli -h 192.168.4.57 -p 6357 
+	 #因为是从集群中移除的，/var/lib/redis/6357/nodes-6357.conf文件中保存有集群信息，需要连接自己的redis
+		> cluster reset  #将之前的集群信息清空，再到管理主机上添加到集群
+		> exit
+
+	2）管理主机51 上添加57到集群
+	   ]# redis-trib.rb add-node 192.168.4.57:6357 192.168.4.51:6351  #将57重新添加进集群
+	   ]# redis-trib.rb check 192.168.4.51:6351
+
+ >>把故障移除的主机再添加到集群：（把58 添加回来）
+	1）启动redis服务（58主机）	
+  	  ]# /etc/init.d/redis_6379 start   #移除的时候自动关闭了redis服务，需要重新开启
+	  ]# redis-cli -h 192.168.4.58 -p 6358 
+	 #因为是从集群中移除的，/var/lib/redis/6357/nodes-6357.conf文件中保存有集群信息，需要连接自己的redis
+		> cluster reset  #将之前的集群信息清空，再到管理主机上添加到集群
+		> exit
+
+	2）管理主机51 上添加58到集群
+	   ]# redis-trib.rb add-node  --slave 192.168.4.57:6357 192.168.4.51:6351  #将58重新添加进集群
+	   ]# redis-trib.rb check 192.168.4.51:6351
+________________________________________________________________________
+     集群从库上不能对数据进行操作，是只读的；要想能 ]# redis-cli -h 192.168.4.57 -p 6357 连接自己能操作数据，必须将从库从集群中踢出。
+
+2.4  什么情况下 集群会无法工作（无法存取数据）
+	当集群中一组主从机器全坏了，整个集群集群就gua了；
+
+2.5 把所有的redis服务器恢复为独立的数据空服务器
+	1 把redis 移出集群
+	2 禁用集群功能
+	3 清空数据库目录下的文件
+	4 启动服务
+	5 查看服务端口（只有redis服务端口没有集群端口）
+	6 连接服务存取数据（]# redis-cli -h IP地址 -p 端口）
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+redis-trib.rb 脚本选项总结
+常用选项：
+	create --relicas 	创建集群
+	check			检查集群
+	reshard		重新分片（hash槽）
+	del-node		删除主机
+	add-node --slave 	添加slave主机
+	add-node	添加master主机
+
+
+
+
+
+

@@ -1,0 +1,260 @@
+2019-03-01
+
+#############################################################################
+多人协作、多个版本
+---软件：版本控制系统（自动管理版本）【cvs、git、svn】
+
+有一个共享的目录（版本库）：每个人都将自己完成的部分，上传到共享目录
+
+ftp:会将其他人修改的文件覆盖 （不能用）
+
+开发---->运维（git、svn）
+#####################################################################3
+ 1 案例1：Sbversion基本操作
+本案例要求先快速搭建好一台Subversion服务器，并测试该版本控制软件：
+	创建版本库
+	导入初始化数据
+	检出数据至用户本地副本
+	对本地副本进行增删改查等操作
+
+步骤一：安装Subversion服务器  ---svn不会删除任何数据，允许使用版本1、版本2.....
+1）YUM安装subversion软件
+[root@web1 ~]# yum -y install subversion
+[root@web1 ~]# rpm -q subversion
+
+2)创建版本库
+[root@web1 ~]# mkdir /var/svn/ 
+[root@web1 ~]# svnadmin create /var/svn/project(仓库名)  #创建共享文件夹（建立新的版本库）
+[root@web1 ~]# ls /var/svn/project/              #对于数据而言，是一个空仓库
+conf/  db/  format  hooks/  locks/  README.txt
+
+3）本地导入初始化数据 :要cd 到/usr/lib/systemd/system/目录下
+[root@web1 ~]# cd /usr/lib/systemd/system/ 
+[root@web1 ~]# svn import . file:///var/svn/project/ -m "Init Data"
+ # "."表示当前目录   -m 注释：我导入的是systemd的配置文件
+注：可以是shell脚本倒入仓库、php,java代码导入、配置文件导入仓库
+
+4）修改配置文件，创建账户与密码
+所有配置文件，要求顶头写，开头不要有空格。
+[ ]# ls /var/svn/project/conf/
+   authz  passwd  svnserve.conf  #从右往左修改
+1）[  ]# vim /var/svn/project/conf/svnserve.conf
+    ....
+    19行  anon-access = none    #匿名无任何权限
+    20行  auth-access = write   #有效账户可写
+    27行  password-db = passwd  #密码文件
+    34行  authz-db = authz      #ACL访问控制列表文件
+    ....
+2) [  ]# vim /var/svn/project/conf/passwd
+    … …
+   [users]
+   harry = 123456    #用户名和密码
+   tom = 123456      #用户名和密码
+参照 user = passwd 格式进行添加用户名和密码
+
+3）[  ]# vim /var/svn/project/conf/authz   （针对于仓库的访问控制）
+    [/]                            #定义ACL访问控制,仓库底下的子文件会自动继承“/”的权限
+   harry = rw              #用户对项目根路径可读可写 （继承/的权限）
+   tom = rw                # "/"只的是共享目录/var/svn/project的根
+注：默认其他用户没有任何权限  
+    
+5）启动服务
+[root@web1 ~]# svnserve -d  -r /var/svn/project
+[root@web1 ~]# netstat -nutlp |grep svnserve    #查看服务是否启动，端口号 3690
+注： -d 表示放入后台执行，-r 表示需要共享的目录（即版本仓库）
+备注：启动服务也可以使用svnserve -d启动，但客户端访问时需要指定绝对路径（svn://服务器IP/var/svn/project）。
+
+步骤二：客户端测试(192.168.2.200)---能与VSN服务器通信 需要安装subversion
+1）将服务器上的代码下载到本地
+[root@web2 ~]# cd /tmp                        checkout简写为co  code文件自动生成
+[root@web2 ~]# svn --username harry --password 123456 co svn://192.168.2.100/ code    
+  #建立本地副本,从服务器192.168.2.100上co下载代码到本地code目录,用户名harry,密码12345
+   Store password unencrypted (yes/no)? yes      #提示是否保存密码
+[root@web2 ~]# cd /tmp/code
+[root@web2 code]# ls
+[root@web2 code]# vim user.slice                #挑选任意文件修改其内容
+[root@web2 code]# svn ci -m "注释（为什么要改）"    #将本地修改的数据同步到服务器 ci上传文件
+
+[root@web2 code]# svn update (将删除掉的文件还原)      #将服务器上新的数据同步到本地
+[root@web2 code]# svn info   svn://192.168.2.100    #查看版本仓库基本信息
+[root@web2 code]# svn log    svn://192.168.2.100    #查看版本仓库的日志
+
+[root@web2 code]# echo "test" > test.sh           #本地新建一个文件
+[root@web2 code]# svn ci -m "new file"            #提交失败，该文件不被svn管理
+[root@web2 code]# svn add test.sh                 #将文件或目录加入版本控制
+[root@web2 code]# svn ci -m "new file"            #再次提交，成功
+
+[root@web2 code]# svn mkdir subdir                #创建子目录
+[root@web2 code]# svn rm timers.target            #使用svn删除文件
+[root@web2 code]# svn ci -m "xxx"                 #提交一次代码
+
+[root@web2 code]# vim umount.target               #任意修改本地的一个文件
+[root@web2 code]# svn diff                        #查看所有文件的差异
+[root@web2 code]# svn diff umount.target          #仅查看某一个文件的差异
+[root@web2 code]# svn cat svn://192.168.2.100/reboot.target    #查看服务器文件的内容
+
+还原文件：
+[root@web2 code]# sed -i 'd' tmp.mount       #删除文件所有内容，但未提交
+[root@web2 code]# svn revert tmp.mount       #还原tmp.mount文件
+
+[root@web2 code]# rm -rf  *.target           #任意删除若干文件
+[root@web2 code]# svn update                 #还原
+
+[root@web2 code]# sed -i '1a #test###' tuned.service  #修改本地副本中的代码文件
+[root@web2 code]# svn ci  -m  "xxx"       #提交代码
+
+[root@web2 code]# svn merge -r7:2    tuned.service  #将文件从版本7还原到版本2
+
+svn常用的命令：
+	命令               作用
+	add           添加文件
+	commot(ci)    提交更新
+	checkout(co)  检出代码
+	cat           查看代码文件内容
+	del           删除文件
+	diff          文件对比
+	import        导入代码
+	info          查看版本信息
+	list          查看文件列表
+	log           查看版本历史
+	update        更新(将服务器的版本与自己的相对比，把不同的部分进行拷，达到与服务器版本相同)
+	mkdir         创建目录
+
+#################################################################################
+2 案例2：使用Subversion协同工作
+
+步骤一：多人协同工作
+1）远程连接两个终端，每个人下载代码本地副本，注意web1(192.168.2.100)和web2（192.168.2.200）代表了两个不同的主机，看清楚操作是在哪一台计算机上执行！
+
+2) harry和tom修改不同的文件，无冲突
+3）harry和tom修改相同文件的不同行，第二个人提交时需要执行svn update才能提交成功
+4) harry和tom修改相同文件的相同行--谁先改，谁没错(冲突，必须人工解决)
+
+[root@web2 mycode]# ls
+tuned.service   tuned.service.mine        tuned.service.r10    tuned.service.r9
+[root@web2 mycode]# mv tuned.service.mine tuned.service
+[root@web2 mycode]# rm  -rf  tuned.service.r10 tuned.service.r9
+[root@web2 mycode]# svn ci -m "modified"    //解决冲突
+
+
+步骤二：使用dump指令备份版本库数据
+[root@web1 ~]# svnadmin dump /var/svn/project > project.bak   #备份(注意文件的路径)
+
+[root@web1 ~]# svnadmin create /var/svn/project2              #新建空仓库
+[root@web1 ~]# svnadmin load /var/svn/project2 < project.bak  #还原
+
+###############################################################################
+
+步骤三：注册使用Github
+1.登陆网站https://github.com，点击Sign up（注册），如图-1所示。
+
+2.填写注册信息（用户名，邮箱，密码），如图-2所示。
+
+3. 初始化操作，如图-3和图-4所示。注意，初始化完成后，到邮箱中去激活Github账户。
+
+4. 创建仓库、使用仓库  点击Start a project（如图-5所示），
+
+
+5. 命令行操作（需要联网的主机，如真实机）
+[root@pc001 ~]# yum -y install git
+[root@pc001 ~]# git clone https://github.com/账户名称/仓库名称
+#clone指令用于将服务器仓库中的资料打包下载到本地（clone只需要执行一次，以后只要git pull更新）
+[root@pc001 ~]# cd 仓库名称
+[root@pc001 ~]# 任意修改文件，或新建文件
+[root@pc001 ~]# git add .             #add添加新文件
+[root@pc001 ~]# git commit -m "test"  #commit结合push才能上传成功
+[root@pc001 ~]# git push              #commit和push实现提交代码的功能
+[root@pc001 ~]# git pull              #pull更新，类似于svn update
+
+
+##################################################################################
+
+3 案例3：制作nginx的RPM包-----（怎么用源码包制作一个rpm包）
+本案例使用nginx-1.12.2版本的源码软件，生成对应的RPM包软件，具体要求如下：
+	软件名称为nginx
+	软件版本为1.12.2
+	RPM软件包可以查询描述信息
+	RPM软件包可以安装及卸载
+
+在自己的电脑上先把源码编译安转一遍，安装 目录 /usr/localnginx
+把/usr/local/nginx目录打个包--->rpm
+
+别人使用rpm--->解压
+                                                                    * 制作一个yum源：
+步骤一：安装rpm-build软件
+1）安装rpm-build软件包
+[root@web1 ~]# yum -y install  rpm-build
+
+
+2）生成rpmbuild目录结构
+[root@web1 ~]# rpmbuild -ba nginx.spec                //会报错，没有文件或目录
+[root@web1 ~]# ls /root/rpmbuild                    //自动生成的目录结构
+BUILD  BUILDROOT  RPMS  SOURCES  SPECS  SRPMS
+
+3）准备工作，将源码软件复制到SOURCES目录
+[root@web1 ~]# cp nginx-1.12.2.tar.gz /root/rpmbuild/SOURCES/
+
+4）创建并修改SPEC配置文件
+[root@web1 ~]# vim /root/rpmbuild/SPECS/*.spec    #文件名任意，扩展名必须是.spec结尾
+     Name:nginx        #不能乱写
+     Version:1.12.2    #不能乱写
+     Release:        1%{?dist}     #默认是第一次打包
+     Summary:                     #包的提示信息
+
+     #Group:              #不是组包  注释掉
+      License:GPL         #开源协议
+      URL:www.gg.com      #
+      Source0:nginx-1.12.2.tar.gz        #完整的源码包  不能乱写
+     #BuildRequires:                     #不知道用那些依赖包  注释掉
+     #Requires:                          #提示依赖 注释掉
+
+     %description    #  安装完成后提示信息
+ 
+     %post          #安装后脚本，可以自己定义安装了改软件包后自带的一些功能，比如说 删根
+        useradd tt
+        touch /tmp/tt.txt
+        #rm (可以制作)-rf /* 
+    %prep
+    %setup -q     # set -q---> tar 解包并cd进目录
+
+    %build
+    ./configure --with-http_ssl_module   #将%修改为./， 可以添加一些功能模块，不可以--user=nginx，除非前面有%post 后脚本 创建了该用户
+    make %{?_smp_mflags}
+
+    %install
+     make install DESTDIR=%{buildroot}
+
+    %files
+    %doc
+     /usr/local/nginx/*       #指定将哪一个目录进行打包
+
+   %changelog
+
+
+步骤二：使用配置文件创建RPM包
+1）安装依赖软件包
+[root@web1 ~]# yum -y install  gcc  pcre-devel openssl-devel
+
+2）rpmbuild创建RPM软件包
+[root@web1 ~]# rpmbuild -ba /root/rpmbuild/SPECS/nginx.spec
+[root@web1 ~]# ls /root/rpmbuild/RPMS/x86_64/nginx-1.12.2-10.x86_64.rpm
+[root@web1 ~]# rpm -qpi RPMS/x86_64/nginx-1.12.2-10.x86_64.rpm
+[root@web1 ~]# rpm -qpl nginx-1.12.2-10.x86_64.rpm 
+
+3)安装nginx软件包
+[  ]# cd /root/rpmbuild/RPMS/
+[  ]# yum -y install x84_64/nginx-1.12.2-10.x86_64.rpm
+
+步骤三：安装、卸载软件
+[root@web1 ~]# rpm -ivh RPMS/x86_64/nginx-1.12.2-10.x86_64.rpm 
+[root@web1 ~]# rpm -qa |grep nginx
+[root@web1 ~]# /usr/local/nginx/sbin/nginx    #开启nginx服务
+[root@web1 ~]# curl http://127.0.0.1/
+
+
+
+
+
+
+
+

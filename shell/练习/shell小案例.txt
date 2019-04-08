@@ -1,0 +1,16 @@
+案例：把文本a.txt里的每一行的最后一个#替换为*
+a.txt里的内容为：
+bvac#ncbaon#baoanmo#ajjcln
+afwfm#bassff#jefhslb
+saefee#ewefnnsv#
+wfbw#fffen#iefnm#saufja#jefbpb
+whefanfaijf#wefnsv
+asbasof#
+答案：
+
+案例：如何同时给每个电话号码前面加区号？
+文本a.txt
+tom  8542687  4662581
+joy    1562186  4587628
+
+答案：  

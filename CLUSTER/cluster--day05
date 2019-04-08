@@ -1,0 +1,293 @@
+2019-03-08
+
+###############################################################################3
+[root@room11pc16 images]# virt-manager   #调出虚拟管理系统
+[root@room11pc16 images]# du -sh .rh7_template.img   #虚拟机镜像文件模板
+3.7G	.rh7_template.img
+[root@room11pc16 images]# du -sh .rhel7.xml    #虚拟机配置文件模板
+8.0K	.rhel7.xml
+****************************************************************************************
+[ ]# cd /var/lib/libvirt/image/    ---------真机上操作
+[]# qemu-img create -f qcow2 -b .rh7_template.img game.qcow2 #快照创建一台名为
+                                                              game的虚拟机
+[root@room11pc16 images]# du -sh game.qcow2
+196K	game.qcow2
+[]# cp .rhel7.xml /etc/libvirt/qemu/game.xml
+[ ]# vim /etc/libvirt/qemu/game.xml       将这些命令写成脚本就可1s创建一台虚拟机
+       修改<name>game</name>
+	  <source file='/var/lib/libvirt/images/game.qcow2
+[  ]# virsh define /etc/libvirt/qemu/game.xml
+
+***************************************************************************************
+虚拟机组成：
+KVM：拷贝这两个文件，即可得到一台虚拟机；（不能直接拷贝完就用）
+    /var/lib/libvirt/images/*.qcow2   #镜像文件
+    /etc/libvirt/qemu/*.xml          #配置文件
+
+   cp  xx.qcow2    new.qcow2  #镜像文件很大
+   cp  xx.xml      nem.xml
+
+  cow (copy on write)写时复制
+
+xx.qcow2[10G]
+new.qcow2[10G]快照---->1s科隆一台虚拟机
+
+****************************************************************************************
+1 案例1：块存储应用案例
+延续Day04的实验内容，演示块存储在KVM虚拟化中的应用案例，实现以下功能：
+	Ceph创建块存储镜像
+	客户端安装部署ceph软件
+	客户端部署虚拟机
+	客户端创建secret
+	设置虚拟机配置文件，调用ceph存储
+1.2 方案
+使用Ceph存储创建镜像。
+KVM虚拟机调用Ceph镜像作为虚拟机的磁盘。
+
+1.3 步骤
+实现此案例需要按照如下步骤进行。
+1）创建磁盘镜像。
+[root@node1 ~]# rbd create vm1-image --image-feature  layering --size 10G
+[root@node1 ~]# rbd create vm2-image --image-feature  layering --size 10G
+[root@node1 ~]# rbd  list
+[root@node1 ~]# rbd  info  vm1-image
+[root@node1 ~]# qemu-img  info  rbd:rbd/vm1-image
+
+2）Ceph认证账户。
+Ceph默认开启用户认证，客户端需要账户才可以访问，
+默认账户名称为client.admin，key是账户的密钥，
+可以使用ceph auth添加新账户（案例我们使用默认账户）。
+[root@node1 ~]# cat /etc/ceph/ceph.conf          #配置文件 
+
+[root@node1 ~]# cat /etc/ceph/ceph.client.admin.keyring    //账户文件
+[client.admin]
+    key = AQBTsdRapUxBKRAANXtteNUyoEmQHveb75bISg==
+
+3）部署客户端环境。
+注意：这里使用真实机当客户端！！！
+客户端需要安装ceph-common软件包，拷贝配置文件（否则不知道集群在哪），
+拷贝连接密钥（否则无连接权限）。
+
+1.真机上安装yum源[mon、osd、tools]，本地挂载yum源----->再安装ceph-common
+2.虚拟机[  ]#yumdownloader ceph-common--->生成ceph-common-10.2.2-38.el7cp.x86_64.rpm 包
+再从虚拟机传给真机：[ ]# scp -P 7920 ceph-common-10.2.2-38.el7cp.x86_64.rp 192.168.4.254:/root
+
+[root@room9pc01 ~]# yum -y  install ceph-common
+[root@room9pc01 ~]# scp 192.168.4.11:/etc/ceph/ceph.conf  /etc/ceph/
+[root@room9pc01 ~]# scp 192.168.4.11:/etc/ceph/ceph.client.admin.keyring \
+/etc/ceph/
+
+4）创建KVM虚拟机。
+使用virt-manager创建2台普通的KVM虚拟机。
+
+5）配置libvirt secret。
+编写账户信息文件（真实机操作）
+[root@room9pc01 ~]# vim secret.xml           #新建临时文件，内容如下 
+<secret ephemeral='no' private='no'>
+        <usage type='ceph'>
+                <name>client.admin secret</name>
+        </usage>
+</secret>
+#使用XML配置文件创建secret
+[root@room9pc01 ~]# virsh secret-define --file secret.xml
+733f0fd1-e3d6-4c25-a69f-6681fc19802b       
+  #随机的UUID，这个UUID对应的有账户信息
+
+编写账户信息文件（真实机操作）
+[root@room9pc01 ~]# cat /etc/ceph/ceph.client.admin.keyring
+ 
+设置secret，添加账户的密钥
+[root@room9pc01] virsh secret-set-value \
+--secret 733f0fd1-e3d6-4c25-a69f-6681fc19802b \
+--base64 AQBTsdRapUxBKRAANXtteNUyoEmQHveb75bISg
+   #这里secret后面是之前创建的secret的UUID
+  #base64后面是client.admin账户的密码
+   #现在secret中既有账户信息又有密钥信息
+
+6）虚拟机的XML配置文件。
+每个虚拟机都会有一个XML配置文件，包括：
+虚拟机的名称、内存、CPU、磁盘、网卡等信息
+[root@room9pc01 ~]# vim /etc/libvirt/qemu/vm1.xml  #不推荐：不能立即生效
+
+不推荐直接使用vim修改配置文件，推荐使用virsh edit修改配置文件，效果如下：
+[root@room9pc01] virsh edit vm1           #vm1为虚拟机名称，修改<disk>与</disk>之间的内容
+<disk type='network' device='disk'>
+      <driver name='qemu' type='raw'/>
+      <auth username='admin'> 
+      <secret type='ceph' uuid='733f0fd1-e3d6-4c25-a69f-6681fc19802b'/> #UUID要改
+      </auth>
+      <source protocol='rbd' name='rbd/vm1-image'>  #服务器的镜像名（要改）
+      <host name='192.168.4.11' port='6789'/>    #服务器的ip地址、ceph-mon的共享端口
+      </source>
+    <target dev='vda' bus='virtio'/>   #virtio性能最好的虚拟磁盘接口
+      <address type='pci' domain='0x0000' bus='0x00' slot='0x07' function='0x0'/>
+    </disk>                          #有可能于下边有冲突----->bus='0x01'
+
+######################################################################################
+2 案例2：Ceph文件系统
+文件系统：格式化之后，NTFS、fat32、ext4、xfs
+文件系统必须要有mds：   inode     block
+
+删除文件：在inode打上删除标记，然后block中原本占用的空间就视为可用空间；只要不再往里写入数据，源文件在
+           block中的数据就不会丢失，可以通过其他软件来将inode上的删除标记去掉，从而恢复源文件。
+
+延续前面的实验，实现Ceph文件系统的功能。具体实现有以下功能：
+	部署MDSs节点
+	创建Ceph文件系统
+	客户端挂载文件系统
+添加一台虚拟机，部署MDS节点。
+主机的主机名及对应的IP地址如表-1所示
+    主机名：node4   ip：192.168.4.14/24
+
+2.3 步骤
+实现此案例需要按照如下步骤进行。
+1）添加一台新的虚拟机，要求如下：
+	IP地址:192.168.4.14                   实验中node3做  mds
+	主机名:node4
+	配置yum源（包括rhel、ceph的源）
+	与Client主机同步时间
+	node1允许无密码远程node4
+2）部署元数据服务器
+登陆node4，安装ceph-mds软件包
+[root@node4 ~]# yum -y install ceph-mds
+
+登陆node1部署节点操作
+[root@node1 ~]# cd  /root/ceph-cluster  #该目录，是最早部署ceph集群时，创建的目录
+[root@node1 ceph-cluster]# ceph-deploy mds create node3  #给nod3拷贝配置文件，启动mds服务
+                                    #node4---->
+同步配置文件和key
+[root@node1 ceph-cluster]# ceph-deploy admin node4  #新起的node4才需要
+
+3）创建存储池
+[root@node4 ~]# ceph osd pool create cephfs_data 128   #创建存储池node3上做，对应128个PG
+[root@node4 ~]# ceph osd pool create cephfs_metadata 128 #创建存储池，对应128个PG-->与容量无关
+
+
+5）创建Ceph文件系统
+[root@node4 ~]# ceph mds stat                    #查看mds状态
+e2:, 1 up:standby           名字任意   inode           block
+[root@node4 ~]# ceph fs new myfs1 cephfs_metadata cephfs_data  #谁在前就是inode，后面的
+new fs with metadata pool 2 and data pool 1                     就是block
+   #注意，现写medadata池，再写data池
+   #默认，只能创建1个文件系统，多余的会报错
+
+[root@node4 ~]# ceph fs ls   #查看文件系统信息
+
+[root@node4 ~]# ceph mds stat #查看文件系统状态
+
+6）客户端挂载
+[root@client ~]# mount -t ceph 192.168.4.11:6789:/  /mnt/cephfs/ \
+-o name=admin,secret=AQBTsdRapUxBKRAANXtteNUyoEmQHveb75bISg==
+   #注意:文件系统类型为ceph
+   #192.168.4.11为MON节点的IP（不是MDS节点）
+  #admin是用户名,secret是密钥
+   #密钥可以在/etc/ceph/ceph.client.admin.keyring中找到
+
+[root@client10 ~]# df -h /media                            #查看文件的大小：
+文件系统             容量  已用  可用 已用% 挂载点                         [ ]# du -sh  文件
+192.168.4.11:6789:/  120G  344M  120G    1% /media
+
+
+硬盘：格式化（inode和block）  inode存文件的属性信息
+				  block存真正的数据
+
+左边：一个文件占一个inode；当inode的格子被用完之后，block还有剩余的空间也用不了
+     默认一个格子大小为 4k；默认容量inode < block
+
+
+########################################################################################
+3 案例3：创建对象存储服务器
+延续前面的实验，实现Ceph对象存储的功能。具体实现有以下功能：
+	安装部署Rados Gateway
+	启动RGW服务
+	设置RGW的前端服务与端口
+	客户端测试
+对象存储必须开发人员写程序                            实验用node2  rgw
+
+1）准备实验环境，要求如下：
+	IP地址:192.168.4.15
+	主机名:node5
+	配置yum源（包括rhel、ceph的源）
+	与Client主机同步时间
+	node1允许无密码远程node5
+	修改node1的/etc/hosts，并同步到所有node主
+
+2）部署RGW软件包：需要在ceph的工作目录下进行ceph-cluster/
+[root@node1 ~]# ceph-deploy install --rgw node5   #远程node5安装rgw软件包
+
+同步配置文件与密钥到node5
+[root@node1 ~]# cd /root/ceph-cluster
+[root@node1 ~]# ceph-deploy admin node5
+
+3）新建网关实例
+启动一个rgw服务
+[root@node1 ~]# ceph-deploy rgw create node5   #启动rgw服务,(----->对象存储完成)
+
+登陆node5验证服务是否启动
+[root@node5 ~]# ps aux |grep radosgw
+
+[root@node5 ~]# systemctl  status ceph-radosgw@\*    #查看ceph-radosgw@\*服务状态
+
+[root@node3 ~]# ss -antulp |grep radosgw   #查看端口为 7480
+
+4）修改服务端口
+登陆node5，RGW默认服务端口为7480，修改为8000或80更方便客户端记忆和使用
+[root@node5 ~]#  vim  /etc/ceph/ceph.conf
+[client.rgw.node5]
+host = node5
+rgw_frontends = "civetweb port=8000"
+   #node5为主机名
+   #civetweb是RGW内置的一个web服务
+
+步骤二：客户端测试
+1）curl测试
+[root@client ~]# curl  192.168.4.15:8000
+
+
+2）使用第三方软件访问
+登陆node5（RGW）创建账户
+
+........................
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

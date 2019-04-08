@@ -1,0 +1,367 @@
+2019-03-15
+
+######################### 《数据备份与数据恢复》 ######################################
+相关概念：
+	1 数据备份方式： 
+		物理备份：直接拷贝库或表对应系统文件 -->只能备份当前的数据，备份时新增数据不能备份
+		逻辑备份：使用备份命令或软件对数据做备份，生成对应的备份文件
+		按服务器状态备份：需要关闭服务器备份 、 不需要关闭服务器备份
+
+	2.数据备份策略：		
+		完全备份：备份所有数据 （1张表 、 1个库 、 1台数据库服务器）
+
+		增量备份：备份上次备份后，所有新产生的数据    二者都是备份新产生的数据
+		差异备份：备份完全备份后，所有新产生的数据
+
+	3.数据物理备份 和 数据物理恢复
+		备份操作：
+		[ ]# cp -rp /var/lib/mysql/*  备份目录/文件名  #拷贝前将数据库服务关闭
+		[ ]# tar -zcvf xxx.tar.gz  /var/lib/mysql/*
+		[ ]# scp -r /mybak/mysql.bak root@192.168.4.51:/root
+
+		恢复操作：
+		[ ]# systemctl status mysqld
+		[ ]# systemctl stop mysqld			
+		[ ]# rm -rf /var/lib/mysql/*
+		[ ]# cp -rp /root/mybak/mysql.bak/* /var/lib/mysql/
+		[ ]# chown mysql:mysql /var/lib/mysql
+		[ ]# systemctl start mysqld
+		[ ]# mysq -uroot -p   #原数据库的密码
+
+
+物理备份：方便简单、相同系统间可用、myisam存储引擎适用
+	  不能跨系统备份、数据量大的时候不适用、innodb存储引擎的数据库不适用
+
+
+一、mysqldump
+	1.1 数据完全备份
+	     1.1.1 命令格式
+		  [ ]# mysqldump --help  #查看帮助
+		  [ ]# man mysqldump
+	备份操作：
+	    [ ]# mysqldump -uroot -p密码   库名 > 路径/xxx.sql
+
+	恢复操作：
+	    [ ]# myql -uroot -p密码  库名 < 路径/xxx.sql
+
+	库名表示方式：
+		--all-databases 或 -A  所有库
+		数据库名		    单个库   #必须有库名
+		数据库名 表名 		   单张表    #必须有库名
+		-B 数据库1 数据库2       多个库
+	注意事项：无论备份还是恢复，都要验证用户权限
+	50备份：
+	]# mysqldump -uroot -p123456 -A > /myback/mysql-all.sql         #备份所有库
+	]# mysqldump -uroot -p123456 userdb user > /myback/userdb.user.sql  #备份单张表
+	]# mysqldump -uroot -p db4 > /myback/db4.sql		        #备份单个库
+	]# mysqldump -uroot -p123456 -B userdb db4 > /myback/twodb.sql  #备份多个库
+
+	]# scp /mybak/userdbp-user.sql root@192.168.4.52:/root
+	]# scp /mybak/db4.sql root@192.168.4.52:/root
+	]# scp /mybak/twodb.sql root@192.168.4.52:/root
+	52数据恢复：
+	[ ]# mysql -uroot -p123456
+		mysql> create database userdb; #当恢复的是单张表时，需要创建相应的数据库
+		mysql> create database bd4;	#当恢复的是单个库时，需要创建相应的数据库
+		mysql> quit
+	[ ]# mysql -uroot -p123456 userdb < /root/userdb.user.sql #当恢复的是单张表时，需
+	[ ]# mysql -uroot -p123456 db4 < /root/db4.sql  #要创建相应的数据库db4
+	[ ]# mysql -uroot -p123456
+		mysql> select * from userdb.user;
+		mysql> use db4;
+		mysql> show tables;
+	1.2 数据完全恢复
+
+
+完全备份 与 完全恢复 的优缺点：
+	缺点：只能恢复到备份那一刻的数据，后面在同名的库重新增的数据不能恢复（会被覆盖）
+	      备份过程中，会锁表，用户不能访问
+	
+
+二、实时增量备份/恢复 ： 使用mysql服务自带的binlog日志文件实现
+	2.1 mysql服务binlog日志的管理
+	    2.1.1 binlog日志介绍
+			二进制日志
+		2.1.2 启用binlog日志
+			mysql> show master status;  #查看正在使用的日志文件
+			[ ]#vim /etc/my.cnf
+			......
+			[mysql]
+			server_id=50  #id号一般设置为与ip号相同
+			log_bin       #启用binlog日志文件
+			.......
+			[ ]# systemctl restart mysqld
+			[ ]# cd /var/lib/mysql
+			[ ]# ls *-bin*
+		
+		2.1.3 自定义binlog日志 存储目录和日志文件名
+
+			[ ]#vim /etc/my.cnf
+			[mysql]
+			server_id=50
+			log_bin=/logdir/plj   #自定义日志文件存放位置
+
+			[ ]# mkdir /logdir         #自定义文件存放目录需要自己创建
+			[ ]# chown mysql /logdir   #给目录设置权限，让mysql对该目录有读写权限
+			[ ]# ls -ld /logdir
+			[ ]# systemctl restart mysqld  #重新启动mysqld服务，重新加载配置文件
+			[ ]# ls /logdir/plj*           #查看可以得到自定义的日志文件
+
+		2.1.4 管理binlog日志文件
+			1.手动生成新的日志文件：
+				1.重启mysql服务
+				2.执行SQL操作 mysql> flush logs;  #登陆状态下执行
+				3.mysqldump --flush-logs
+				4.mysql -uroot -p密码 -e 'flush logs'
+			2.删除binlog日志
+				mysql> show master status;  #查看正在使用的日志文件
+				mysql> show master logs;    #查看日志文件
+				mysql> purge master logs to "binlog文件名";  #删除日志
+				mysql> reset master;       #清空日志文件，编号变为000001
+  
+			msyql> purge master logs to "plj.000005"  #删除5之前的日志	
+		
+		2.1.5 查看日志文件内容-----日志为二进制，不能用vim查看，只记录改变数据内容的
+			2.1.5.1  查看日志文件内容命令
+			[ ]# mysqlbinlog [选项] binlog日志文件名
+		常用选项：
+		 	--start-datetime="yyyy-mm-dd hh:mm:ss"
+			--stop-datetime="yyyy-mm-dd hh:mm:ss"  #时间点
+			--start-position=数字   #偏移量
+			--stop-position=数字
+
+			[ ]# msqlbinlog /logdir/plj.000001   #不加选项--显示日志文件所有内容
+
+			2.1.5.2 日志记录sql命令格式
+		三种记录格式：
+			1.statement：
+			2.row：
+			3.mixed：
+
+			[ ]# vim /etc/my.cnf
+				[mysqld]
+				server_id=50
+				log_bin=/logdir/plj
+				binlog_format="mixed"
+
+		mysql> show variables like "binlog_format"; #查看默认使用的日志格式
+		mysql> reset master;
+		mysql> show master status;
+		mysql> show databases;
+		mysql> create database bbsdb;
+		mysql> create talbe bbsdb.user(name char(10),password char(6));
+		mysql> insert into bbsdb.user values("tom","123456");
+		mysql> insert into bbsdb.user values("yaya","777888");
+		mysql> insert into bbsdb.user values("jack","888888");
+		mysql> desc bbsdb.user;
+
+			2.1.5.3 日志记录sql命令方式
+				时间点：记录命令执行的时间
+				偏移量：记录命令的长度
+
+		mysql> insert into bbsdb.user values("alice","777888");
+		mysql> insert into bbsdb.user values("jim","888888");
+		mysql> delete from bbsdb.user where name in ("alic","jim"); 
+		mysql> quit
+
+		[]# ls /logdir/
+		[]# mysqlbinlog --start-position=1900 --stop-position=2054 \
+			/logdir/plj.000001 | mysql -uroot -p123456
+
+	2.2 使用binlog日志恢复数据
+		2.2.1 命令用法
+			[ ]# mysqlbinlog [选项] 日志文件  | mysql -uroot -p密码
+	例子:	50:
+		[ ]# scp /logdir/plj.000002 root@192.168.4.52:/root
+		52:
+		[ ]# mysqlbinlog /root/plj.000001 | mysql -uroot -p123456
+		[ ]# mysql -uroot -p123456
+			mysql> show databases;
+			mysql> select * from bbsdb.user;			
+		
+		
+三、innobackupx
+	3.1 软件介绍
+	物理备份：跨平台性差；备份时间长、冗余备份、浪费存储空间
+	mydqldump备份：效率较低、备份和还原速度慢
+			  备份过程重，数据插入和更新操作会被挂起
+	XtraBackup工具：强大的在线热备份工具、备份过程中不锁库表，适合生产环境
+			   由专业组织Percona提供（该进MySQL分支）
+	组要包含两个组件：
+			  xtrabackup：C程序，支持InnoDB/XtraDB
+			  innobackupex：以Per脚本封装xtrabackup，还支持MyISAM存储引擎
+
+
+	3.2 安装软件:
+      [ ]# yum -y install  libev-4.15-1.el6.rf.x86_64.rpm
+	                     percona-xtrabackup-24-2.4.7-1.el7.x86_64.rpm
+	[ ]# innobackupex --help
+	[ ]# man innobackupex
+
+	3.3 命令用法
+	[ ]# innobackupex [选项]  备份目录
+
+
+3.4 数据备份与恢复
+	3.4.1 数据完全备份与恢复
+		   1.备份数据（可在线备份）
+		[]# innobackupex --user root --password 123456 /allbak --no-timestamp
+		[]# ls /allbak
+
+		   2.恢复数据 52（不可在线恢复）
+
+			[]# systemctl stop mysqld
+			[]# rm -rf /var/lib/mysql/*
+		2.1 准备恢复数据
+			[]# innobackupex --apply-log 备份文件（/allbak） #准备还原（回滚日志）
+		2.2 把备份文件拷贝到数据库目录下
+			[]# innobackupex --copy-back  备份文件（/allbak） #恢复数据
+		2.3 修改目录的所有者和组为mysql用户
+			[]# chown -R mysql.mysql /var/lib/mysql
+		2.4 启动服务
+			[]# systemctl start mysqld
+		2.5 管理员登陆查询数据
+			[]# mysql -uroot -p123456
+
+		
+	3.4.2 数据增量备份与恢复
+	    1. 增量备份	
+		第一次是完全备份
+		  ~]# innobackupex --user root -p 123456 /fullbak --no-timestamp
+	         mysql> insert into db5.a values(44) 写10条
+		第二次是增量备份
+		  ]# innobackupex --user root -p 123456 --incremental /newdir \
+		      --incremental-basedir=/fullbak/ --no-timestamp		
+
+		第三次增量备份
+		  ]# innobackupex --user root -p 123456 --incremental /new1dir \
+		      --incremental-basedir=/newdir --no-timestamp		
+
+innobackupex命令执行增量备份时，是如何知道 在备份的所有数据里，那些数据是新产生的？
+		备份目录下的日志序列号与数据库目录下日志序列号相比较，序列号相同---数据没有变化
+			序列号不相同，则有新数据产生
+
+		2.增量恢复      50:
+				~]# systemctl stop mysqld
+				~]# rm -rf /var/lib/mysql/*
+
+			1.准备恢复数据
+				~]# innobackupex --apply-log --redo-only /fullback/
+			2.合并日志
+				~]# innobackupex --apply-log --redo-only
+                                          --incremental-dir=/new1 /fullback/
+				~]# innobackupex --apply-log --redo-only 
+                                          --incremental-dir=/new2 /fullback/
+				
+				~]# rm -rf /new1
+				~]# rm -rf /new2
+				~]# ls /var/lib/mysql/ -l   #查看所有者和所属组
+				 
+			3.把备份文件拷贝数据库目录下
+				~]# innobackupex --copy-back /fullback
+			4.修改数据库目录所有者和所属组用户为mysql
+				~]# chown -R mysql.mysql /var/lib/mysq
+			5.启动mysqld服务
+				~]# systemctl start mysqld
+			6.管理员登陆测试
+				~]# mysql -uroot -p123456
+
+		3.4.3 从完全备份中恢复当张表
+			mysql> create table b(name char(10));	
+			mysql> insert into b values("tom");   写10条		
+			mysql> show tables;
+
+			备份：
+			～]# innobackupex -u root -p 123456 --databases="db5" /db5back \
+					--no-timestamp
+			~]# ls /db5back
+			mysql> drop table db5.b;
+
+			恢复b表：
+				步骤：
+				1.创建b表
+				2.删除b表 表空间文件b.ibd
+				3.在备份数据里导出表信息
+				4.把导出的表信息文件拷贝数据库目录下
+				5.修改表信息文件的所有者和所属组该为mysql
+				6.导入表信息
+				7.查看表记录
+		mysql> create table db5.b;
+		mysql> alter table b discard tablespace;
+		mysql> select * from b;
+		mysql> select * from b;
+		ERROR 1814 (HY000): Tablespace has been discarded for table 'b'
+
+		~]# innobackupex --apply-log --export /db5back/
+		[root@mysql-50 /]# ls /db5back/db5/
+		a.cfg  a.exp  a.frm  a.ibd  b.cfg  b.exp  b.frm  b.ibd  db.opt
+	
+		mysql> system ls /db5back/db5/
+		a.cfg  a.exp  a.frm  a.ibd  b.cfg  b.exp  b.frm  b.ibd	db.opt
+		mysql> system cp /db5back/db5/b.{cfg,exp,ibd} /var/lib/mysql/db5/
+		mysql> system chown mysql:mysql /var/lib/mysql/db5/b.*
+		mysql> system ls /var/lib/mysql/db5/ -l
+
+		mysql> alter table db5.b import tablespace;
+		mysql> select * from b;
+		mysql> select * from a;
+
+		mysql> system rm -rf /var/lib/mysql/db5/b.cfg
+		mysql> system rm -rf /var/lib/mysql/db5/b.exp
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

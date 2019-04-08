@@ -1,0 +1,195 @@
+2019-01-26
+
+
+#################################################################
+mac  硬件地址  物理地址
+长度48位  6字节
+8位（bit）=1字节（byte）
+
+前24位  供应商标示，后24位产品编号
+单播 1对1  组播 1对多  广播 1对所有
+
+数据帧
+目标地址   源地址  类型/长度   数据（MTU1500） 校验
+
+交换机工作原理：学习  广播   转发  更新
+广播域：
+
+###########################################################################
+
+    网络层解析
+
+一、网络层
+   *连接不同范围的主机（不同的valn、网段等）
+   *同一个网段的主机，通过交换机就可连通
+   *不同网段的主机，需要通过路由器才能连通
+
+（1）网络层的功能
+  1.定义了基于IP协议的逻辑地址
+  2.连接不同的媒介类型
+  3.选择数据通过网络的最佳路径
+
+（2）ICMP协议
+ ping 借助协议达成目的
+ 协议 借助ping实现其功能
+
+  1.ICMP通过IP数据报传送，用来发送错误和控制信息
+  2.ICMP定义了很多信息类型，例如： 
+  3.ICMP检测双向通路的连通性
+  4.Ping命令使用ICMP协议
+      -- Ping [-t]  [-l字节数] 目标IP或主机名---windows环境
+   5.常见的ping反馈结果：
+     --- 连接建立成功，Reply from 目标地址...
+     --- 目标主机不可达，Destination host unreachable
+     --- 请求时间超时，Request time out
+
+
+（3）什么是路由器
+  1.将数据包从一个网络发送到另一个网络
+    --- 需要依靠路由器来完成
+    --- 路由器只关心网络的状态，决定最佳路径
+
+
+192.168.1.0
+192.168.1.254 
+
+
+服务器需要配置网关地址，必须与服务器ip是在同一个网段
+
+路由器配置IP：
+Router（config）#interface gigabitEthernet 0/0 #进入G0/0接口
+Router（config-if）#ip address 192.168.1.254 255.255.255.0 #配置ip地址
+Router（config-if）#no shutdown #打开接口
+
+路由表：标识了当前设备能够到达的网段，以及方向
+Router#show ip route  #查看路由表
+
+1.C-connected （直连路由）：产生条件是接口要配置ip，并且处于开启状态
+2.S-static（静态路由）：由管理员手工配置，并且设备两端都有相同的配置，否则有去无回
+，由 目标网段（网络ID）+子网掩码+下一跳地址
+3.S* （默认路由）：特殊的静态路由，在路由表中，可以到达任意地点，其他路由条目无法到达时，将使用默认路由，通常在企业网关设备对外出口使用。
+4.（动态路由）：使用某种动态路由协议实现，可以做到学习路由条目，根据网络状态自动变化来达成网络互通的目的。------减少了管理任务，占用了网络带宽
+   宣告：对外通告本设备能够到达的网段
+动态路由协议OSPF：
+
+
+路由环路：要杜绝
+ Router（config）#ip route 0.0.0.0  0.0.0.0 下一跳
+
+
+第一台路由器：
+Router（config）#ip route 192.168.3.0  255.255.255.0 192.168.2.2
+#配置前往3.0网段，并且出口方向是192.168.2.2的静态路由
+第二台路由器：
+Router（config）#ip route 192.168.1.0 255.255.255.0 192.168.2.1
+#配置前往1.0网段，并且出口方向是192.168.2.1的静态路由
+
+
+Router（config-if）#no ip add #删除错误的ip地址，重新配置
+Router（config-if）#no ip route #删除错误的路由
+
+
+思路：
+1.考虑所要前往的目标网段
+2.考虑前往的目标网段第一步往哪个ip跳
+3.使用静态路由器
+
+配错的路由一定要删掉，
+
+排错：一个一个ping，哪一个ping不通，就是哪里出错
+
+  2.路由器怎么工作
+    
+                 
+
+
+二、VLAN间通讯
+（1）三层交换技术
+   1.使用三层交换技术实现VLAN间通信
+   2.三层交换=二层交换+三层转发
+
+（2）虚接口概述
+   1.在三层交换机上配置的VLAN接口为虚接口
+   2.使用SVI（交换机虚拟接口）实现VLAN间路由
+
+Router（config）#vlan 2
+Router（config）#interface vlan 2
+Router（config-if）#ip address 192.168.2.254  255.255.225.0 #配置SVI接口地址
+Router（config）#interface f0/2
+Router（config-if）#switchport access vlan 2 #将接口加入vlan 2
+Router（config）#ip routing  #开启路由功能
+
+思路：
+创建valn，进入vlan接口--->给vlan（SVI接口）配置ip地址-->开启路由功能
+
+
+思路：
+1.添加一台二层交换机，创建valn2、vlan3
+2.将二层交换机f0/2接口加入vlan2、f0/3接口加入vlan3、f0/24接口配置为中继模式
+Switch（conf）#in f0/2
+Switch（conf-if）#swotchport access vlan 2 #将接口加入vlan2
+Switch（conf）#in f0/3
+Switch（conf-if）#switchport access vlan 3 #将接口加入vlan3
+Switch（conf）#in f0/24
+Switch（conf-if）#switchport  mode trunk
+
+3.在三层交换机的f0/24接口上封装802.1q协议，然后配置为中继模式
+
+三层交换机配置中继链路，选封装802.1q协议，再配置
+Switch（conf）#interface fastEternet 0/24
+Switch（conf-if）#switchport trunk encapsulation dot1q  #打封装
+Switch（conif）#switchport mode trunk
+
+开启路由功能：
+
+
+
+
+
+
+    -- 虚拟接口的引入使得应用更加灵活
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

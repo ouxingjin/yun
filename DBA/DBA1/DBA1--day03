@@ -1,0 +1,358 @@
+2019-03-13
+
+########################################################################################
+vns 172.40.50.117:7000
+
+第三阶段：
+一、数据库管理 15天   数据库管理员  DBA
+1.1  RDBMS： MySQL
+1.2  NoSQL： Redis  和 MongoDB
+
+二、安全与监控 6天
+2.1 安全： 系统安全  服务安全  数据安全  网络安全
+2.2 监控：zabbix
+
+#######################################################################################
+一、MySQL存储引擎
+     1.1 MySQL存储引擎介绍
+         1.1.1 MySQL体系结构 （8个组件组成）
+		1.管理工具：MySQL自带的命令
+		2.连接池（进程）： 验证用户连接和检查系统资源 
+		3.SQL接口：把命令传递给进程（mysql服务）处理
+		4.分析器：检查sql命令语法是否正确
+		5.优化器：对执行的sql命令优化，怎么节省资源就怎么执行
+		6.查询缓存：存储查找过的数据（8MB 作为缓存 从物理内存划分出来）
+		7.存储引擎：处理表的处理器
+		8.文件系统：/var/lib/mysql
+
+	   1.1.2 存储引擎介绍	 
+	作为可插拔式的组件提供：
+  		----MySQL服务软件自带的功能程序，处理表的处理器
+ 		------ 不同的存储引擎有不同的功能和数据存储方式
+	默认的存储引擎：
+     		MySQL 5.0/5.1 ---> MyISAM
+		MySQL 5.5/5.6 ---> InnoDB
+   
+       1.2 查看存储引擎
+	    1.2.1 查看已有表的使用存储引擎
+   		mysql> show create  table 表名\G; #要进入到表所在的数据库里
+  
+	    1.2.2 查看数据库服务默认使用的存储引擎
+		mysql> show engines; 或show engines\G;
+
+     1.3 修改存储引擎
+	    1.3.1 修改数据库服务默认使用的存储引擎
+		[ ]# systemctl stop mysqld
+		[ ]# vim /etc/my.cnf
+ 		[mysqld]
+		default-storage-engine=myisam
+		.....
+		[ ]# systemctl start mysqld
+	    1.3.2 修改表使用的存储引擎  
+		mysql> show tables;
+		mysql> show create table 表名\G;
+		mysql> alter table   表名  engine=存储引擎;
+
+	    1.3.3 建表时指定表使用的存储引擎
+		mysql> create table  表名(name char(10)) engine=innodb;
+    
+     1.4 常用存储引擎特点
+		1.4.1 MYISAM存储引擎特点：
+		支持表级锁
+		不支持外键、事物、事物回滚
+		表文件个数：3个:   表名.frm（存表结构）  表名.MYD（存放数据） 表名.MYI（index索引信息）  
+		1.4.1 INNODB存储引擎特点：
+			支持外键：
+			支持行级锁：
+			支持事物和事物回滚：
+			事物特点：
+			表文件个数:  表名.frm（存表结构）  表名.ibd（数据+index索引信息）
+		1.4.3 术语解释：
+		外键：
+		行级锁：只锁定某一行（对访问的行加锁）
+		表级锁：一次直接对整张表进行加锁
+		页级锁：对整个页面（内存）进行加锁----1页-->1M
+		事物：对数据访问的连接（登陆）-->数据操作--->断开连接的整个过程
+		事物回滚：在访问过程中，任意一步操作失败，恢复之前的所有操作--->根据事物日志文件进行回滚
+		事物日志文件：记录对所有innodb存储引擎表的操作 /varlib/mysql/
+					ibdata1: 记录没有提交的命令
+					ib_logfile0: 记录已提交（正确）的命令
+					ib_logfile1:
+一个连接就是一个事物
+		事物特性：ACID
+			Atomic原子性  Consisteny一致性   Isolation隔离性   Durability持久性
+	mysql> show variables like "autocommit"; #查看提交状态
+	mysql> set autocommit=off;    #关闭自动提交
+	mysql> create table good(id int) engine=innodb;  #创建存储引擎为innodb的表
+	mysql> insert into good values(12155); #往表里插入数据，但没有提交
+	mysql> commit;  #手动提交，终端2才能才看得到表里的数据
+
+	mysql> delete from good;  #删除表中的数据，但没有提交，终端2仍可以查看得到数据
+	mysql> rollback;    #事物回滚，可以将数据回滚到删除前的状态,终端2不知道终端1删除过数据
+	mysql> commit;      #删除后提交了，则有持久性，两边都看不到数据了	
+	
+	锁粒度由存储引擎决定：行级锁、表级锁、页级锁
+	锁类型由访问方式决定：读锁（共享锁）--->支持并发读
+			写锁（互斥锁、排它锁）--->是独占锁，上锁期间其他线程不能读表或写表
+
+      1.5 工作中建表时，如何决定表使用那种存储引擎？
+		select 操作多的表，适合使用myisam存储引擎，优点节省系统资源
+		insert/update/delete 写操作多的表，适合使用innodb存储引擎，优点并发访问量大
+
+
+
+二、数据导入导出
+    2.0
+   2.1  数据导入：把系统文件的内容存储到数据库的表里
+  
+..
+mysql> show variables like "secure_file_priv"; 查看默认使用目录及目录是否存在
++------------------+----------+------------------------------------------+
+| Variable_name    | Value    			|
++------------------+----------+------------------------------------------+
+| secure_file_priv | /var/lib/mysql-files/ |
++------------------+----------+-------------------------------------------+
+1 row in set (0.00 sec)
+mysql>quit
+
+[root@mysql-50 ~]# cd /var/lib/mysql-files/
+[root@mysql-50 mysql-files]# mkdir /mydata
+[root@mysql-50 mysql-files]# chown mysql /mydata
+[root@mysql-50 mysql-files]# vim /etc/my.cnf
+        ............
+       [mysqld]
+	secure_file_priv="/mydata"
+	.............
+[root@mysql-50 mysql-files]# systemctl stop mysqld
+[root@mysql-50 mysql-files]# systemctl start mysqld
+
+mysql> show variables like "secure_file_priv";  #默认检索目录修改成功
++------------------+----------+-------------------------+
+| Variable_name    | Value       |
++------------------+----------+------------------------+
+| secure_file_priv | /mydata	  |
++------------------+----------+------------------------+
+
+数据导入：
+格式用法：
+mysql> load data infile "目录名/文件名" into table 数据库名.表名
+         fields terminated by "分隔符"  lines terminated by "\n";
+注意事项：字段分隔符要与文件内的一致
+	   指定导入文件的绝对路径
+	   导入数据的表字段类型要与文件字段匹配
+	   禁用Selinux保护机制
+
+步骤：	1.
+	2.
+	3.
+
+案例：（1）将/etc/passwd文件导入userdb库user表并给每条记录加编号
+      （2）将userdb库user表中uid小与100的前10条记录导出，存为/mydata/user2.txt文件。
+1）数据导入：
+[root@mysql-50 mysql-files]# cp /etc/passwd /mydata/  #将文件拷贝到默认检索目录
+
+mysql> create database userdb;     #创建userdb数据库
+mysql> create table userdb.user(   #在userdb库中创建user表
+    -> username char(50),
+    -> password char(1),
+    -> uid int,
+    -> gid int,
+    -> comment char(150),
+    -> homedir char(180),
+    -> shell char(50)
+     -> );	
+mysql> load data infile "/mydata/passwd" into table userdb.user  fields terminated by ":" lines terminated by "\n";     #将默认检索目录下的passwd文件导入user表中
+
+mysql> alter table userdb.user add      #在uesr表添加表字段id
+    -> id int primary key auto_increment first;
+
+mysql> select * from userdb.user;     #查看user表的每一列信息
+
+2）数据导出：
+mysql> select username,shell from userdb.user where id >=20 into outfile  "/mydata/3.txt" fields terminated by ":" lines terminated by "\n";
+
+
+
+ 2.2  数据导入出：把数据库的表里的记录存放到系统文件
+mysql> SQL查询 into outfile "目录/文件名" fieds terminated by "分隔符" 
+         lines terminated by "\n";    #查什么，就导出什么
+注意事项：
+	导出的内容由SQL查询语句决定
+	导出的是表中的记录，不包括字段名
+	禁用SElinux
+
+三、管理表记录
+3.1 插入表记录insert into
+	 1.向表中插入1条记录给所有字段赋值：
+ 	      insert into 数据库名.表名 values（字段值列表）;
+	2.向表中插入多条记录给所有字段赋值：
+		insert into 数据库名.表名 values（字段值列表1），（字段值列表2），...;
+	3.向表中插入1条记录给个别字段赋值：
+		insert into 库名.表名（字段列表） values(地段列表);
+	4.向表中插入多条记录给个别字段赋值：
+		insert into 库名.表名(字段列表) values(字段值列表1),(字段值列表2)..; 
+
+
+3.2 查询表记录：条件控制行数，字段控制列数，*匹配所有字段
+    语法格式1：
+         select 字段1,...字段N  from 库名.表名;
+   语法格式2：
+	   select 字段1...字段N  from  库名.表名 where 条件表达式;
+
+3.3 更新表记录
+    语法格式1：
+	  update 库名.表名 set 字段1="字段1",..字段N="字段N";  #修改所有满足条件的
+    语法格式2：
+	  update 库名.表名 set 字段1="字段1",..字段N="字段N" where 条件表达式;  #更新部分记录
+
+3.4 删除表记录：
+    语法格式1：mysql> delete from 库名.表名 where 条件表达式;  #
+    语法格式2：mysql> delete from 库名.表名;   #删除所有表记录
+
+
+
+四、匹配条件
+ 4.1 基本匹配条件
+     4.1.1 数值比较：>  >=  <  <=  =  !=
+              where 字段名  符号  数字;  
+        mysql> select name,uid from user where uid <=10;
+     4.1.2 字符比较时，字段类型必须是字符类型：
+               where 字段名  符号 "字符串";
+        mysql> select username,shell from user where shell!="/bin/bash";
+     4.1.3 匹配空/非空
+          where 字段名  is null;
+          where 字段名  is  not null;
+
+     4.1.4 逻辑匹配（多个判断条件）
+        and（逻辑与）：多个判断条件必须同时成立 
+	  or（逻辑或）：多个判断条件某一个条件成立即可
+	   ! 或 not(逻辑非)：取反
+	   () 提高优先级
+
+     4.1.5 范围内匹配/去重显示
+      1) in（值列表）  在...里..  #
+         mysql> select * from userdb.user where username in("root","rsync","admin");
+      2) not in(值列表) 不在..里...
+         mysql> select username ,shell from userdb.user where shell not in 
+                                              ("/bin/bash","/sbin/nologin");
+      3) between 数字1 and 数字2  在...之间..
+         mysql> select * from userdb.user where id between 4 and 11;
+      4) distinct 字段名   去重显示
+         mysql> select distinct shell from userdb.user; #类似于分组，
+
+
+4.2 高级匹配条件
+     4.2.1模糊查询：
+       基本用法： "_"匹配单个字符、"%"匹配0～N个字符
+             where 字段名 like '通配符'
+  mysql> select username from userdb.user where username like '____'; #查询四个字符
+  mysql> select username from userdb.user where username like '%a%';  #包含a         
+  mysql> select username from userdb.user where username like '__%__'; #至少四个字符
+
+    4.2.2 正则表达式
+       基本用法： 元字符 ^  $  .  [  ]   *  | 
+		where  字段名  regexp  '正则表达式'
+  mysql> select username , uid from userdb.user where uid regexp '^....$';
+  mysql> select username from userdb.user where username regexp 't$';
+  mysql> select username from userdb.user where username regexp '^r.*t$'; 
+  mysql> insert into userdb.user(username) values("3yaya"),("ya8ya"),
+                                                 ("yay5a"),("yaya9");
+  mysql> select username from userdb.user where username regexp '[0-9]';
+
+   4.2.3 四则运算
+     计算符号： + - * /  %=
+mysql> select * from user where id <= 5;
+mysql> update user set uid=uid+2 where id <= 5; #更新id小于5的uid在原来基础上加2
+mysql> select * from user where id <= 5;        #查看更新后的结果
+
+mysql> select * from user where username="root";  #查看root行的信息
+mysql> select username , uid+gid sum from user where username="root"; #求和
+
+mysql> alter table user add age tinyint default 25 after username;  #添加age字段
+mysql> select username,2019-age csnf from user where username="root"; #查询出生年份
+
+mysql> select username,uid,gid,(uid+gid)/2 pjz from user wehre username="bin"; #
+
+4.3 操作查询结果
+   4.3.1 聚集函数（mysql服务软件自带的对数据做统计的命令）
+   MySQL内置数据统计函数：
+       avg(字段名)     #统计字段平均值
+	 sum(字段名)     #统计字段之和
+ 	 min(字段名)     #统计字段最小值
+	 max(字段名)     #统计字段最大值
+ 	 count(字段名)   #统计字段值个数
+       不加条件-->整个表的；添加条件--->符合要求
+mysql> select avg(gid) from user;
+mysql> select avg(gid) from user where gid <=10;
+
+mysql> select sum(uid) from user;
+mysql> select sum(uid) from user where shell!="/sbin/nologin";
+
+mysql> select min(uid) from user where shell!="/bin/bash";
+mysql> select max(uid) from user where shell!="/bin/bash";
+
+mysql> select count(username)from user where shell!="/bin/bash";
+mysql> select count(username) from  user;
+mysql> select count(*) from user;
+
+
+   4.3.2 查询结果排序
+     基本用法： SQL查询结果 +  order  by 字段名(数值类型字段) [ asc（升序） | desc（降序） ];
+mysql> select username , uid from user where uid between 10 and 1000 order by uid;
+mysql> select username , uid from user where uid between 10 and 1000 order by uid 
+                                                                    desc;	       
+   4.3.3 查询结果分组-------按查询结果分组（按什么分组就查什么：按shell分组就查shell）
+     基本用法： SQL查询结果 + group by 字段名;
+mysql> select shell from user group by shell; 
+mysql> select shell from user where uid<=1000;
+mysql> select shell from user where uid<=1000 group by shell; 
+mysql> select shell from user where uid>1000 group by shell;
+
+   4.3.4 查询结果过滤 ---在查询的结果里，再找一遍
+     基本用法：
+      SQL查询 +  having 条件表达式;
+      SQL查询 +  where  条件  having 条件表达式;  #不是对原表查询，比直接用where速度要快
+      SQL查询 +  group by 字段名  having 条件表达式
+mysql> select username from user where shell!="/bin/bash" having username="gdm";
+mysql> select username from user where uid <=1000 having username="gdm";
+mysql> select username from user where uid<=1000 and username="gdm";
+mysql> select shell from user where shell!="/bin/bash" group by shell  having 
+                                                             shell="/bin/sync";
+
+   4.3.5 限制查询结果显示行数
+     基本用法：
+      SQL查询 + limit N;    #显示查询结果前N条记录      
+      SQL查询 + limit N,M;  #显示指定范围内的查询记录
+      SQL查询 + where  条件查询  limit 3;    #显示查询结果前3条记录
+      SQL查询 + where  条件查询  limit 3,3;  #从第4条开始，共显示3条
+mysql> select * from user where uid>=10 and uid <=500 limit 3;
+mysql> select id,username,homedir from user  where uid>=10 and uid<=500 limit 3,3;
+mysql> select username,uid,homedir from user where uid >=1000 order by  
+                                                                 uid desc limit 1;
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

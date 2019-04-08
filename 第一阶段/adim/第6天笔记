@@ -1,0 +1,311 @@
+基本权限
+ 访问方式（权限）
+  ---读写：允许查看内容 -read       r
+  ---写入：允许修改内容-write       w
+  ---可执行：允许运行和切换-execute  x
+
+  对于文本文件：
+    r： cat  less  head  tail
+    w：vim能够保存   >   >>
+    x:执行权限针对于Shell脚本
+
+基本权限的类别
+权限适用对象（归属）
+--- 所有者：拥有此文件/目录的用户 -user         u
+--- 所属者：拥有此文件/目录的组 -group          g（一般为用户的基本组）
+--- 其他用户：除所有者、所属组以外的用户 -other   o
+
+擦好看权限
+使用ls -l命令
+  -- ls -ld 文件/或目录...
+
+  以 d 开头为目录
+  以 - 开头为文本文件
+  以 l 开头为快捷方式
+
+[root@goodgame ~]# ls -ld /etc/
+drwxr-xr-x. 133 root root 8192 1月   5 08:29 /etc/
+
+权限位 硬连接数 属主 属组 大小 最后修改时间 文件/目录名称
+
+[root@goodgame ~]# ls -ld /tmp/
+drwxrwxrwt. 17 root root 4096 1月   5 09:41 /tmp/
+
+
+设置基本权限
+使用chmod命令  (格式很灵活）-------只有root才能执行此命令
+---- chmod [-R] 归属关系+-=权限类别  文档...
+           [-R]：递归修改权限
+
+[root@goodgame ~]# mkdir /nsd01
+[root@goodgame ~]# ls -ld /nsd01/
+drwxr-xr-x. 2 root root 6 1月   5 10:09 /nsd01/
+
+[root@goodgame ~]# chmod u-w,g+w,o=w /nsd01/
+[root@goodgame ~]# ls -ld /nsd01/
+dr-xrwx-w-. 2 root root 6 1月   5 10:09 /nsd01/
+
+[root@goodgame ~]# chmod u=rwx,g=rx,o=r /nsd01/
+[root@goodgame ~]# ls -ld /nsd01/
+drwxr-xr--. 2 root root 6 1月   5 10:09 /nsd01/
+
+[root@goodgame ~]# chmod ugo=rwx /nsd01/
+[root@goodgame ~]# chmod 0=--- /nsd01/
+
+
+
+#################################################################
+Linux中如何判定用户具备的权限
+    1.判断用户属于什么角色    所有者>所属组>其他人  （匹配即停止）
+    2.查看相应角色权限位置的权限
+
+#################################################################
+目录的 r 权限：能够 ls 浏览此目录内容
+目录的 w 权限：能够执行 rm/mv/cp/mkdir/touch等更改
+目录的 x 权限：
+
+
+
+
+##################################################################
+设置文档归属
+
+使用chown命令
+  ---chown [-R] 属主  文档...
+  ---chown [-R] ：属组  文档...
+  ---chown [-R] 属主：属组  文档...
+
+[root@goodgame ~]# mkdir /nsd03
+[root@goodgame ~]# ls -ld /nsd03
+
+[root@goodgame ~]# chown :tarena /nsd03
+
+
+
+现在用lisi用户，对/etc/shadow文件具备读权限，有几种办法
+ 1.修改其他人权限  chmod  o+r /etc/shadow
+2.修改归属关系，将lisi修改所有者
+     chown  lisi  /etc/shadow
+     chmod  u+r  /etc/shadow
+3.修改归属关系，将lisi组修改所属组
+     chown  ：lisi  /etc/shadow
+     chmod   g+r  /etc/shadow
+4.利用ACL策略 setfacl -m u:lisi:r  /etc/shadow
+
+########################################################
+附加权限（特殊权限）
+
+Set GID
+附加在属组的 x 位上
+----属组的权限标识会变为 s
+----使用于目录，Set GID可以使目录下新增的文档自动设置与父目录相同的属组
+总结：传递所属组身份
+
+使用chmod命令
+ --格式：chmod  g+s  文档...
+
+[root@goodgame ~]# mkdir /nsd08
+[root@goodgame ~]# ls -ld /nsd08
+
+[root@goodgame ~]# chown :tarena /nsd08
+[root@goodgame ~]# ls -ld /nsd08
+
+[root@goodgame ~]# mkdir /nsd08/abc02
+[root@goodgame ~]# ls -ld /nsd08/abc02/
+
+[root@goodgame ~]# chmod g+s /nsd08
+[root@goodgame ~]# ls -ld /nsd08
+drwxr-sr-x. 3 root tarena 18 1月   5 14:30 /nsd08
+[root@goodgame ~]# mkdir /nsd08/abc03
+[root@goodgame ~]# ls -ld /nsd08/abc03
+drwxr-sr-x. 2 root tarena 6 1月   5 14:32 /nsd08/abc03
+
+
+
+案例：
+
+[root@goodgame ~]# mkdir /home/admins
+[root@goodgame ~]# groupadd adminuser
+[root@goodgame ~]# ls -ld /home/admins/
+drwxr-xr-x. 2 root root 6 1月   5 14:37 /home/admins/
+[root@goodgame ~]# chown :adminuser /home/admins/
+[root@goodgame ~]# ls -ld /home/admins/
+drwxr-xr-x. 2 root adminuser 6 1月   5 14:37 /home/admins/
+[root@goodgame ~]# chmod g+w /home/admins/
+[root@goodgame ~]# ls -ld /home/admins/
+drwxrwxr-x. 2 root adminuser 6 1月   5 14:37 /home/admins/
+[root@goodgame ~]# chmod o=--- /home/admins/
+[root@goodgame ~]# ls -ld /home/admins/
+drwxrwx---. 2 root adminuser 6 1月   5 14:37 /home/admins/
+[root@goodgame ~]# chmod g+s /home/admins/
+[root@goodgame ~]# ls -ld /home/admins/
+drwxrws---. 2 root adminuser 6 1月   5 14:37 /home/admins/
+[root@goodgame ~]# touch /home/admins/1.txt
+[root@goodgame ~]# ls -ld /home/admins/1.txt
+-rw-r--r--. 1 root adminuser 0 1月   5 14:41 /home/admins/1.txt
+
+#################################################################
+
+acl访问控制列表
+文档归属的局限性
+   ---任何人只属于三种角色：属主、属组、其他人
+   ---无法实现更精细的控制
+
+acl访问策略
+  ---能够对个别用户、个别组设置独立的权限
+  ---大多数挂载的EXT3/4、XFS文件系统默认已支持
+
+
+使用 getfacl、setfacl命令
+   ----getfacl  文档....
+   ----setfacl  [-R]  -m  u:用户名：权限类别  文档...  #创建acl策略
+   ----setfacl  [-R]  -m  g:用户名：权限类别  文档...
+   ----setfacl  [-R]  -x  u:用户名   文档...            #删除指定ACL策略
+   ----setfacl  [-R]  -b  文档...                        #清除所有ACL策略
+
+
+[root@goodgame ~]# setfacl -m u:lisi:rx /nsd11
+[root@goodgame ~]# getfacl /nsd11
+getfacl: Removing leading '/' from absolute path names
+# file: nsd11
+# owner: root
+# group: root
+user::rwx
+user:lisi:r-x
+group::r-x
+mask::r-x
+
+root@goodgame ~]# setfacl -x u:lisi /nsd12    #删除指定ACL策略
+root@goodgame ~]# getfacl /nsd12              #查看ACL策略
+
+[root@goodgame ~]# setfacl -b /nsd12   #清除所有acl策略
+root@goodgame ~]# getfacl /nsd12
+
+
+Linux系统的权限类别：基本权限、附加权限、acl访问控制列表
+
+
+#######################################################
+设置黑名单：[root@goodgame ~]# setfacl -m u:lisi:--- /nsd11
+
+
+##########################################################
+
+使用LDAP认证，实现网络用户认证，达到用户的集中管理（比较前沿的技术）
+ 
+网络用户：用户信息会放在网络中的LDAP服务器
+本地用户：
+   
+红帽官方三大认证：
+  RHSA(红帽认证系统管理员）
+  RHCE(红帽认证系统工程师）
+  RHCA(红帽认证架构师）
+
+LDAP服务端：classroom
+
+
+客户端：虚拟机sever
+ 1.安装sssd软件，于LDAP服务器沟通
+[root@goodgame ~]# yum -y install sssd
+
+ 2.安装authconfig-gtk图形的工具，进行配置客户端sssd软件
+[root@goodgame ~]# yum -y install authconfig-gtk
+[root@goodgame ~]# authconfig-gtk
+
+完安全合格的主机名：www.baidu.com  www.qq.com
+
+选择LDAP	
+    dc=example,dc=com    #指定服务端域名
+     classroom.example.com   #指定服务端主机名
+  
+    勾选TLS加密
+    使用证书加密：
+  http://classroom.example.com/pub/example-ca.crt
+
+   选择LDAP密码
+ 
+ 3.重启服务
+[root@goodgame ~]# systemctl restart sssd  #重启服务
+[root@goodgame ~]# systemctl enable sssd   #设置开机自启动
+[root@goodgame ~]# grep ldapuser0 /etc/passwd
+[root@goodgame ~]# id ldapuser0         #验证LDAP用户信息
+
+
+###############################################################
+
+家目录漫游
+  
+什么是NFS共享
+Network File System，网络文件系统
+  ---由NFS服务器将指定的文件夹共享给客户机
+  ---客户机将此共享目录 mount到本地目录，访问此共享
+     资源就像访问本地目录一样方便
+  ----类似于EXT4、XFS等类型，只不过资源还在网上
+
+客户端：虚拟机server
+
+1.查看NFS资源
+ ----showoumt -e [服务器地址]
+
+[root@goodgame ~]# showmount -e classroom.example.com
+Export list for classroom.example.com:
+/home/guests 172.25.0.0/255.255.0.0
+
+2.挂载NFS共享目录
+----mount 服务器地址:目录路径 本地挂载点
+
+[root@goodgame ~]# mkdir /home/guests
+[root@goodgame ~]# mount classroom.example.com:/home/guests/  /home/guests/
+[root@goodgame ~]# ls /home/guests/
+[root@goodgame ~]# su - ldapuser0
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

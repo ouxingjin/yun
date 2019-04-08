@@ -1,0 +1,370 @@
+2019-04-04
+
+#############################################################################
+一、系统审计
+1.1 什么是审计：
+   1）基于事先配置的规则生成日志，记录可能发生在系统上的事件
+
+
+1.2 审计的案例
+
+
+1.3 部署audit
+   1) 使用审计系统需要安装audit软件包
+   1）主配置文件/etc/audit/auditd.conf
+
+]# yum list |grep audit  #查看audit相关的软件包
+]# yum -y install audit
+]# cat /etc/audit/auditd.conf
+	log_file = /var/log/audit/audit.log   #日志文件
+]# systemctl start auditd  #该程序开启不能用stop停止
+
+
+1.4 配置审计
+   1）auditctl命令
+	* auditctl命令控制审计系统并设置规则决定哪些行为会被记录日志
+]# auditctl -s  #查看服务状态
+]# auditctl -l  #查看规则
+]# auditctl -D  #删除所有规则
+
+  2）定义临时规则：重启系统失效
+格式：]# auditctl -w path -p permission -k key_name
+	* path为需要审计的文件或目录
+	* 权限可以是r，w，x，a（文件或目录的属性发生变化）
+	* key_name为可选项，方便识别哪些规则生成特定的日志文件
+]# auditctl -w /etc/passwd -p wa -k passwd_change
+	#设置规则所有对passwd文件的写、属性修改操作都会被记录审计日志
+
+修改规则配置文件实现永久定义规则：
+    ]# vim /etc/audit/rules.d/audit.rules 
+	......
+
+搜索日志：
+	]# auditctl -l  #查看设置的规则，包括规则名
+	]# ausearch -k 规则名 -i  #根据key搜索日志，-i为交互式操作
+~]# ausearch -k fdisk_efg
+type=EXECVE msg=audit(1554255756.033:253): argc=2 a0="fdisk" a1="-l"
+type=SYSCALL msg=audit(1554255756.033:253): arch=c000003e syscall=59 success=yes exit=0 a0=2128100 a1=218eb40 a2=21d7b10 a3=7ffcc3f56600 items=2 ppid=3460 pid=3499 auid=1001 uid=1001 gid=1001 euid=1001 suid=1001 fsuid=1001 egid=1001 sgid=1001 fsgid=1001 tty=pts1 ses=9 comm="fdisk" exe="/usr/sbin/fdisk" subj=unconfined_u:unconfined_r:unconfined_t:s0-s0:c0.c1023 key="fdisk_efg"
+
+  日志选项说明：
+	
+
+
+二、服务安全
+2.1 网站服务安全
+	2.1.1 nginx服务安全
+	   1）在50 上运行nginx服务：装包，
+	./configure :
+		--with 加载模块
+		--without 禁用模块
+	#在nginx配置中的server里添加“autoindex on；” 开启自动索引功能模块
+	#
+[root@DBA-50 nginx-1.12.2]# ./configure --help |grep auto  #默认加载自动索引模块
+  --without-http_autoindex_module    disable ngx_http_autoindex_module
+
+  ]# mkdir /usr/local/nginx/html/user
+  ]# ls /usr/local/nginx/html/
+  ]# echo 123 >/usr/local/nginx/html/user/a.html
+  ]# echo 456 >/usr/local/nginx/html/user/b.html
+  ]# echo 7809 >/usr/local/nginx/html/user/c.html
+	#访问网站目录会把该目录下的所有文件暴露
+	Index of /user/
+	../
+	a.html    03-Apr-2019 02:31     4
+	b.html    03-Apr-2019 02:31     4
+	c.html    03-Apr-2019 02:31     5
+解决办法：
+1） 删除不需要的模块
+	[root@proxy nginx-1.12]# ./configure \
+	>--without-http_autoindex_module \      #禁用自动索引文件目录模块
+	>--without-http_ssi_module
+
+2） 修改版本信息，并隐藏具体的版本号
+	]# curl -i http://192.168.4.50/test.html	 #-i 可以获取协议的头部信息
+	   HTTP/1.1 200 OK
+	   Server: nginx/1.12.2
+	    ........
+	[root@DBA-50 nginx-1.12.2]# vim +48 src/http/ngx_http_header_filter_module.c
+		.........
+	  static u_char ngx_http_server_string[] = "Server:good" CRLF;   #修改什么就输出什么
+	  static u_char ngx_http_server_full_string[] = "Server:good " CRLF;
+	  static u_char ngx_http_server_build_string[] = "Server:good " CRLF;
+	[root@DBA-50 nginx-1.12.2]# ./configure
+	[root@DBA-50 nginx-1.12.2]# make && make install
+	[root@proxy nginx-1.12]# killall nginx
+	[root@proxy nginx-1.12]# /usr/local/nginx/sbin/nginx      #启动服务
+	[root@DBA-50 nginx-1.12.2]# curl -i 192.168.4.50/test.html
+	   HTTP/1.1 200 OK
+	   Server:good 
+		.................
+
+3） 限制并发量
+    DDOS攻击者会发送大量的并发连接，占用服务器资源（包括连接数、带宽等），这样会导致正常用户处于等待或无法访问服务器的状态。
+Nginx提供了一个ngx_http_limit_req_module模块，可以有效降低DDOS攻击的风险，操作方法如下：
+~]# ab -c 1000 -n 1000 http://192.168.4.50/  #默认发送多少请求，就处理多少请求
+解决办法：
+[root@DBA-50 nginx-1.12.2]# /usr/local/nginx/sbin/nginx -s stop
+    ]# vim /usr/local/nginx/conf/nginx.conf
+	......
+	http{
+ 	limit_req_zone $binary_remote_addr zone=one:10m rate=1r/s; 
+		#拿出10m内存来存储客户端IP地址，当前处理1个，1s处理一个
+	    server {
+        	listen 80;
+        	server_name localhost;
+        	limit_req zone=one burst=5; #这5个请求，每秒处理1个
+		#除了正在处理的，还把另外的5个放入10m的内存中，一个处理6个请求，其余的请求不管
+            }
+         }
+[root@DBA-50 nginx-1.12.2]# /usr/local/nginx/sbin/nginx  #重启服务
+~]# ab -c 1000 -n 1000 http://192.168.4.50/ #压力测试：一个只处理6个请求，其余的请求不管
+
+
+4） 拒绝非法的请求
+      网站使用的是HTTP协议，该协议中定义了很多方法，可以让用户连接服务器，获得需要的资源。但实际应用中一般仅需要get和post。
+	请求方法	功能描述
+	GET		请求指定的页面信息，并返回实体主体
+	HEAD		类似于get请求，只不过返回的响应没有具体的内容，用户获取头部信息
+	POST		向指定资源提交数据进行处理（例如提交表单或者上传文件）
+	DELETE	请求服务器删除指定的页面
+	PUT		向服务器特定位置上传资料
+
+未修改服务器配置前，客户端使用不同请求方法测试：
+[root@client ~]# curl -i -X GET  http://192.168.4.5    #正常
+[root@client ~]# curl -i -X HEAD http://192.168.4.5    #正常
+curl命令选项说明：
+	#-i选项：访问服务器页面时，显示HTTP的头部信息
+	#-X选项：指定请求服务器的方法
+
+通过如下设置可以让Nginx拒绝非法的请求方法：
+[root@proxy ~]# vim /usr/local/nginx/conf/nginx.conf
+	#在server里添加：
+              if ($request_method !~ ^(GET|POST)$ ) {
+                     return 444;
+		}
+	#这里，!符号表示对正则取反，~符号是正则匹配符号
+	#如果用户使用非GET或POST方法访问网站，则retrun返回444的错误信息
+[root@client ~]# curl -i -X GET  http://192.168.4.5      #正常
+[root@client ~]# curl -i -X HEAD http://192.168.4.5      #报错     
+     
+5） 防止buffer溢出
+# 当客户端连接服务器时，服务器会启用各种缓存，用来存放连接的状态信息。
+# 如果攻击者发送大量的连接请求，而服务器不对缓存做限制的话，内存数据就有可能溢出（空间不足）。
+# 修改Nginx配置文件，调整各种buffer参数，可以有效降低溢出风险。
+[root@proxy ~]# vim /usr/local/nginx/conf/nginx.conf
+	http{
+	client_body_buffer_size  1K;
+	client_header_buffer_size 1k;
+	client_max_body_size 16k;    #设置最大值
+	large_client_header_buffers 4 4k;   #
+	 … …
+	}
+[root@proxy ~]# /usr/local/nginx/sbin/nginx -s reload
+
+
+步骤二：数据库安全
+	在50 主机上运行mysql服务(安装mariadb-server软件)
+~]# yum -y install mariadb-server mariadb
+~]# systemctl start mariadb
+
+1） 初始化安全脚本
+	安装完MariaDB或MySQL后，默认root没有密码，并且提供了一个任何人都可以操作的test测试数据库。有一个名称为mysql_secure_installation的脚本，该脚本可以帮助我们为root设置密码，并禁止root从远程其他主机登陆数据库，并删除测试性数据库test
+[root@proxy ~]# systemctl status mariadb   #确保服务已启动 
+[root@proxy ~]# mysql_secure_installation  #执行初始化安全脚本
+	
+2）密码安全
+手动修改MariaDB或MySQL数据库密码的方法：
+~]# mysqladmin -uroot -predhat password 'mysql'  #修改密码，旧密码为redhat，新密码为mysql
+MariaDB [(none)]>set password for root@'localhost'=password('redhat');
+                        #使用账户登录数据库，修改密码
+> update mysql.user set password=password("123456")
+	> where
+	> user="root" and host="localhsot";
+
+修改密码成功，而且密码在数据库中是加密的，有什么问题吗？问题是你的密码被明文记录了，下面来看看明文密码：
+~]# cat .bash_history   #
+~]# cat .mysql_history  #记录了在数据库中的所有操作
+~]# cat ~/.viminfo  #记录所有vim操作
+~]# mysqlbinlog binlog日志
+解决办法:
+	1)管理好自己的历史记录,不使用明文登陆,选择合适的版本(5.6版本后修复了）,定期删除日志
+	2)日志,行为审计
+	3)防火墙从TCP设置ACL(禁止外网接触数据库)
+
+3）数据备份与还原
+首先，备份数据库（注意用户名为root，密码为redhat）：
+~]# mysqldump -uroot -predhat mydb table > table.sql  #备份数据库中的某个数据表
+~]# mysqldump -uroot -predhat mydb > mydb.sql   #备份某个数据库
+~]# mysqldump -uroot -predhat --all-databases > all.sql  #备份所有数据库
+接下来，还原数据库（注意用户名为root，密码为redhat）：
+~]# mysql -uroot -predhat mydb  < table.sql   #还原数据表
+~]# mysql -uroot -predhat mydb  < mydb.sql    #还原数据库
+~]# mysql -uroot -predhat < all.sql           #还原所有数据库
+
+4）数据安全: 默认数据是明文传输
+在服务器50，创建一个数据库账户：
+	~]# mysql -uroot -p123456  #使用管理员，登陆数据库
+	  > grant all on *.* to tom@'%' identified by '123';  #/创建一个新账户tom
+	使用tcpdump抓包（192.168.4.50):
+	~]# tcpdump -w log -i any src or dst port 3306
+	   # 抓取源或目标端口是3306的数据包，保存到log文件中
+客户端（192.168.4.100）从远程登陆数据库服务器（192.168.4.5）
+[root@client ~]# mysql -utom -p123 -h 192.168.4.5
+  #在192.168.4.100这台主机使用mysql命令登陆远程数据库服务器（192.168.4.5）
+  #用户名为tom，密码为123
+MariaDB [(none)]> select * from mysql.user;
+    #登陆数据库后，任意执行一条查询语句
+
+回到服务器查看抓取的数据包:
+ ~]# tcpdump -A -r log
+     #使用tcpdump查看之前抓取的数据包，很多数据库的数据都明文显示出来
+
+如何解决？
+    可以使用SSH远程连接服务器后，再从本地登陆数据库（避免在网络中传输数据，因为网络环境中不知道有没有抓包者）。
+    或者也可以使用SSL对MySQL服务器进行加密，类似与HTTP+SSL一样，MySQL也支持SSL加密（确保网络中传输的数据是被加密的）。
+
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+2.2.2 Tomcat服务安全  
+[root@DBA-50 lnmp_soft]# which java   #查看程序
+[root@DBA-50 lnmp_soft]# java -version   #查看版本
+
+  在50 主机上部署tomcat赋服务:
+	]# cd lnmp_soft/
+	]# tar -xf apache-tomcat-8.0.30.tar.gz
+	]# mv apache-tomcat-8.0.30 /usr/local/tomcat  #免安装版,
+	]# /usr/local/tomcat/bin/startup.sh  #启动tomcat服务
+	]# ss -antulp |grep 8080
+
+	]# echo 112222 > /usr/local/tomcat/webapps/ROOT/test.html #编写一个网页文件
+	]# curl 192.168.4.50:8080/test.html #测试文页文件
+
+tomcat服务优化配置:
+1） 隐藏版本信息、修改tomcat主配置文件（隐藏版本信息）
+未修改版本信息前，使用命令查看服务器的版本信息:
+   ~]# curl -I http://192.168.4.50:8080/test.html #访问存在的页面文件,查看头部信息
+   	 Server: Apache-Coyote/1.1   #软件
+ 	.......
+   ~]# curl  http://192.168.4.50:8080/xx  #访问不存在的页面文件，查看错误信息,会输软件版本信息
+
+修改tomcat配置文件，修改版本信息：
+  先安装软件包:
+~tomcat]# yum -y install java-1.8.0-openjdk-devel
+	]# cd /usr/local/tomcat/lib/
+  ~lib]# jar -xf catalina.jar
+  ~lib]# vim org/apache/catalina/util/ServerInfo.properties
+	    #根据自己的需要，修改版本信息的内容
+修改后测试:
+	]# curl -I http://192.168.4.50:8080/test.html #再次访问存在的网页文件,
+		.....
+		Server: goodgame   #不会暴露真实的服务信息
+~]# vim /usr/local/tomcat/conf/server.xml
+	.......
+	<Connector port="8080" protocol="HTTP/1.1"
+     connectionTimeout="20000"  redirectPort="8443" server="goodgame" />
+
+修改后再次测试:
+	~]# curl  http://192.168.4.50:8080/xx  
+	#不加-I,访问不存在的网页文件,不会暴露真实的软件版本信息
+
+
+2）降级启动
+  默认tomcat使用系统高级管理员账户root启动服务，启动服务尽量使用普通用户。
+	[root@DBA-50 lib]# ps aux |grep -i java 
+  	#当有人获得java程序的执行权限后,就相当于得到了root的权限
+
+]# useradd tomcat  #创建普通授权用户
+]# chown -R tomcat:tomcat /usr/local/tomcat/  
+    #修改tomcat目录的权限，让tomcat账户对该目录有操作权限
+]# su -c "/usr/local/tomcat/bin/startup." tomcat 
+   #使用su命令切换为tomcat账户，以tomcat账户的身份启动tomcat服务
+]# vim /etc/rc.local  #修改文件,设置开机自启
+	su -c /usr/local/tomcat/bin/startup.sh tomcat
+]# chmod +x /etc/rc.local
+
+3）删除默认的测试页面
+[root@web1 ~]# rm -rf  /usr/local/tomcat/webapps/*
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+3 案例3：使用diff和patch工具打补丁
+50开发程序    51客户端
+
+]# mkdir /domo
+]# vim /domo/lnmp.sh
+   #!/bin/bash
+	echo "hello world"
+]# cp /domo/lnmp.sh  /domo/lnmp_1.sh
+]# vim /domo/lnmp_1.sh
+    #!/bin/bash
+	echo "hello world"
+	echo "hello world"
+	echo "hello world"
+	echo "hello world"
+]# diff -u  /domo/lnmp.sh /domo/lnmp_1.sh  > /domo/lnmp_1.patch  #生成布丁文件
+]# cat /domo/lnmp_1.patch
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+diff逐行比较：
+	diff的原则：告诉我们怎么修改第一个文件后能得到第二个文件
+	]# diff [选项]  文件1  文件2（内容多） > 文件3.patch
+		-u 输出统一内容的头部信息（打补丁使用）
+		-r 递归对比目录中的所有资源（可以对比目录）
+		-a 所有文件视为文本（包括二进制程序）
+		-N 无视文件为空文件（空文件怎么变成第二个文件）
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+例子2：
+50主机：
+	]# kdir /demo
+	]# mkdir /demo/{source1,source2}
+	]# echo "hello world" > /demo/source1/test.sh
+	]# echo "hello the world" > /demo/source2/test.sh
+	]# echo "aaaa" >/demo/source2/tmp.txt
+	]# cp /usr/bin/find /demo/source1/
+	]# cp /usr/bin/find /demo/source2/
+	]# echo 1111 >>/demo/source2/find 
+	]# yum -y install tree
+	]# scp -r /demo/source1 192.168.4.51:/demo #将最先开发source1传给51主机
+	]# diff -uraN /demo/source1 /demo/source2 > /demo/buding.patch 
+	    #在source1的基础上进行改进，形成成source2目录---->需要生成source1的补丁文件
+	]# scp /demo/buding.patch 192.168.4.51:/tmp/ #51主机从50上下载补丁文件，进行升级
+51主机：
+	]# mkdir /demo 
+	]# ls /demo   #有source1目录	
+	]# ls /tmp    #有补丁文件
+
+51打补丁：
+ # 最好进入到补丁文件所记录的路径中：]# cat 补丁文件----查看补丁文件记录的路径 
+ #执行补丁的路径与补丁文件中记录的路径，重复几个，就删除几个
+	]# yum -y install patch  #安装提供打补丁命令的软件包
+	]# which patch
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+格式：
+   ]# patch -p数字  < 补丁文件
+	# patch -pnum（其中num为数字，指定删除补丁文件中多少层路径前缀）
+	# 如原始路径为/u/howard/src/blurfl/blurfl.c
+	# -p0则整个路径不变
+	# -p1则修改路径为u/howard/src/blurfl/blurfl.c
+	# -p4则修改路径为blurfl/blurfl.c
+	# -R(reverse)反向修复，-E修复后如果文件为空，则删除该文件
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+	]# cd /demo/source1
+	]# patch -p3 < /tmp/buding.patch  #打补丁，删除了3层路径（有3层路径重复）
+	   patching file find
+         patching file test.sh
+         patching file tmp.txt
+	]# patch -RE < /tmp/buding.patch  #还原旧版本，反向修复
+
+
+
+#################################################################################
+
+谭培艳 :188
+
+
+
+
+
+
+
+
+

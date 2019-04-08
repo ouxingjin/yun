@@ -1,0 +1,412 @@
+2019.01.04 
+ 
+管理用户和组
+   用户账户：登陆操作系统，不同用户具备不同的权限
+   组 ：方便管理用户，进行分类
+
+   用户帐号唯一标识：  UID（编号）  GID（编号）
+   管理员的UID永远为0
+
+   组帐号：基本组（只有一个）    附加组（从属组，可以有多个）
+       基本组：由Linux系统创建，并且由系统将用户加入，与用户同名
+       附加组：由系统管理员创建，并且由系统管理员加入
+
+      Linux中一个用户至少属于一个组
+
+##################################################################
+添加用户
+用户基本信息存放在/etc/passwd文件
+[root@server0 ~]# head -1 /etc/passwd
+root:x:0:0:root:/root:/bin/bash
+用户名：密码占位符：UID：基本GID：用户描述信息（可有可无）：用户的家目录：解释器
+
+
+使用useradd命令
+ --useradd  [选项]...用户名
+常用命令选项：-u 用户id、、 、
+           -d 家目录路径
+           -G附加组
+           -s登陆Shell
+
+-u 用户id:
+
+[root@server0 ~]# useradd nsd01
+[root@server0 ~]# id dc            #查看用户信息
+id: dc: no such user
+[root@server0 ~]# id nsd01
+uid=1001(nsd01) gid=1001(nsd01) 组=1001(nsd01)
+
+[root@server0 ~]# useradd -u 1500 nsd04
+[root@server0 ~]# id nsd04
+uid=1500(nsd04) gid=1500(nsd04) 组=1500(nsd04)
+
+ -d 家目录路径:
+
+[root@server0 ~]# head -1 /etc/passwd
+root:x:0:0:root:/root:/bin/bash
+[root@server0 ~]# useradd -d /mnt/nsd06 nsd06
+[root@server0 ~]# ls /mnt/
+nsd06
+[root@server0 ~]# grep nsd06 /etc/passwd
+nsd06:x:1501:1501::/mnt/nsd06:/bin/bash
+
+ -G附加组:指定附加组
+使用groupadd命令：
+
+[root@server0 ~]# groupadd tarena      #创建组
+[root@server0 ~]# useradd -G tarena nsd07  
+[root@server0 ~]# id nsd07
+uid=1502(nsd07) gid=1503(nsd07) 组=1503(nsd07),1502(tarena)
+[root@server0 ~]# useradd -G tarena nsd08
+[root@server0 ~]# id nsd08
+uid=1503(nsd08) gid=1504(nsd08) 组=1504(nsd08),1502(tarena)
+
+
+-s 指定解释器程序
+  /sbin/nologin：禁止用户登陆系统
+
+[root@server0 ~]# useradd -s /sbin/nologin nsd09
+[root@server0 ~]# grep nsd09 /etc/passwd
+nsd09:x:1504:1505::/home/nsd09:/sbin/nologin
+[root@server0 ~]# useradd -s /sbin/nologin nsd10
+[root@server0 ~]# grep nsd10 /etc/passwd
+nsd10:x:1505:1506::/home/nsd10:/sbin/nologin
+
+#######################################################3
+设置登陆密码
+使用passwd命令 
+  --格式：passwd [用户名]
+  --echo '密码' |  passwd --stdin 用户名
+
+[root@server0 ~]# passwd nsd01     #管理员修改nsd01的密码
+更改用户 nsd01 的密码 。
+新的 密码：                                  #输入新密码
+无效的密码： 密码少于 8 个字符
+重新输入新的 密码：                         #重新输入密码
+passwd：所有的身份验证令牌已经成功更新。
+
+[root@server0 ~]# su - nsd01        #命令行临时切换到nsd01用户
+[nsd01@server0 ~]$ passwd           #nsd01修改自己的密码
+Changing password for user nsd01.
+Changing password for nsd01.
+(current) UNIX password:             #输入旧密码
+New password: 
+BAD PASSWORD: The password is shorter than 7 characters
+New password: 
+BAD PASSWORD: The password is shorter than 7 characters
+New password:                         #输入新密码
+Retype new password:                  #重新输入新密码
+passwd: all authentication tokens updated successfully.（成功）
+[nsd01@server0 ~]$ exit               #退回到root用户
+
+#################################################################
+重定向输出：将命令的输出，写入到文本文件中
+  >:覆盖重定向
+  >>:追加重定向
+[root@server0 ~]# ls --help > /opt/ls.txt
+[root@server0 ~]# less /opt/ls.txt 
+[root@server0 ~]# hostname > /opt/ls.txt 
+[root@server0 ~]# cat /opt/ls.txt 
+
+[root@server0 ~]# hostname >> /opt/ls.txt 
+[root@server0 ~]# cat /opt/ls.txt 
+
+[root@server0 ~]# tail -2 /etc/passwd >> /opt/ls.txt 
+[root@server0 ~]# cat /opt/ls.txt 
+
+使用echo命令：
+
+[root@server0 ~]# echo goodgame > /etc/hostname
+[root@server0 ~]# cat /etc/hostname
+
+[root@server0 ~]# 登出
+Connection to 172.25.0.11 closed.
+[root@room11pc1 ~]# ssh -X root@172.25.0.11
+
+[root@goodgame ~]# echo nameserver 172.25.254.254 > /etc/resolv.conf 
+[root@goodgame ~]# cat /etc/resolv.conf
+
+[root@goodgame ~]# echo 43543545 > /opt/1.txt
+[root@goodgame ~]# cat /opt/1.txt
+[root@goodgame ~]# echo fdjfhdu >> /opt/1.txt 
+[root@goodgame ~]# cat /opt/1.txt
+
+#######################################
+管道 | ：将前面命令的输出，传递到后面命令，作为后面命令的参数
+          显示/etc/passwd文件8～12行内容：
+    [root@goodgame ~]# cat -n /etc/passwd | head -12 | tail -5
+     8	halt:x:7:0:halt:/sbin:/sbin/halt
+     9	mail:x:8:12:mail:/var/spool/mail:/sbin/nologin
+    10	operator:x:11:0:operator:/root:/sbin/nologin
+    11	games:x:12:100:games:/usr/games:/sbin/nologin
+    12	ftp:x:14:50:FTP User:/var/ftp:/sbin/nologin
+
+[root@goodgame ~]# cat -n /etc/passwd | head -12 | tail -5 > /opt/a.txt
+[root@goodgame ~]# cat /opt/a.txt
+
+非交互式设置密码：echo
+--echo ‘密码’ | passwd --stdin 用户名
+[root@goodgame ~]# echo redhat |passwd --stdin nsd01
+更改用户 nsd01 的密码 。
+passwd：所有的身份验证令牌已经成功更新。
+
+  交互式：人和计算机一问一答执行命令
+
+
+
+用户密码信息存放在/etc/shadow文件
+
+[root@goodgame ~]# head -1 /etc/shadow
+root:$6$UiGI4Tc2$htsXYn5cJnOqv3P1VLcUSgfjDu2pL5yiJBuua6foZAHdwqeuLHfYUfS/vBn27Wjvoel8EJgtdsMjyquqvKAmf1:16261:0:99999:7:::
+
+[root@goodgame ~]# tail -1 /etc/shadow
+nsd10:!!:17900:0:99999:7:::
+
+用户名：密码加密字符串：上一次修改密码时间：
+
+
+查看系统时间：date
+[root@goodgame ~]# date
+2019年 01月 04日 星期五 11:46:35 CST
+
+修改时间：date -s ‘年-月-日  时：分：秒’
+[root@goodgame ~]# date -s '2008-10-15 12:59:59'
+2008年 10月 15日 星期三 12:59:59 CST
+
+
+计算器bc
+
+#################################################################
+
+修改用户属性
+
+使用usermod命令:只是修改了/etc/passwd中相对应的字段的值,并没有创建相应的家目录
+  --usermod  [选项]...用户名
+ 常用命令选项：-u 用户id、-d家目录路径、-G附加组 、-s 登陆Shells
+
+
+[root@goodgame ~]# useradd nsd12
+[root@goodgame ~]# id nsd12
+uid=1506(nsd12) gid=1507(nsd12) 组=1507(nsd12)
+[root@goodgame ~]# grep nsd12 /etc/passwd
+nsd12:x:1506:1507::/home/nsd12:/bin/bash
+[root@goodgame ~]# usermod -u 1600 -G tarena -d /mnt/nsd12 -s /sbin/nologin  nsd12
+[root@goodgame ~]# id nsd12
+uid=1600(nsd12) gid=1507(nsd12) 组=1507(nsd12),1502(tarena)
+[root@goodgame ~]# grep nsd12 /etc/passwd
+nsd12:x:1600:1507::/mnt/nsd12:/sbin/nologin
+
+vim /etc/passws
+
+
+删除用户
+使用userdel命令
+ --userdel [-r] 用户名
+  -r: 连同家目录一起删除
+Permission denied：权限不足
+
+
+#################################################################
+管理组帐号
+
+添加组
+  组基本信息存放在/etc/group文件
+
+
+使用groupadd命令
+  --group  [-g 组ID] 组名
+[root@goodgame ~]# groupadd stugrg
+[root@goodgame ~]# grep  stugrg /etc/group
+stugrg:x:1508:
+组名：密码占位符：组的GID：组成员列表 
+
+[root@goodgame ~]# useradd harry
+[root@goodgame ~]# useradd natasha
+[root@goodgame ~]# useradd jack       #几个红帽官方常用的用户名
+[root@goodgame ~]# useradd kenji
+
+  组成员的密码信息存放在/etc/gshadow文件
+使用gpassws命令
+  --gpasswd -a 用户名  组名
+  --gpasswd -d 用户名  组名  #
+
+
+[root@goodgame ~]# gpasswd -a jack stugrg 
+[root@goodgame ~]# grep stugrg /etc/group   #查看
+stugrg:x:1508:harry,kenji,jack
+[root@goodgame ~]# 
+
+
+
+删除组
+使用groupdel命令
+  --groupdel  组名
+
+不能删除用户的基本组
+
+
+
+
+
+
+
+
+
+
+
+
+
+常见的压缩格式及命令工具：
+    .gz  ----> gzip
+    .bz2 ----> bzip2
+    .xz -----> xz
+
+tar进行归档及压缩（打包）：把后边的打包到前面
+格式：
+     tar  选项  /路径/压缩包的名字  /路径/源文档1  /路径/源文档2
+
+
+
+tar工具的常用选项
+-- -c：创建归档
+-- -C：指定释放的路径
+-- -x：释放归档（所有的选项的最后）
+-- -f：指定归档文件名称
+-- -z、-j、-J：调用.gz、.bz2、.xz格式的工具进行处理
+-- -t：显示归档中的文件清单
+
+制作tar备份包
+使用tar -c..命令
+  -- tar -zcf 备份文件.tar.gz  被备份的文档..
+  -- tar -jcf 备份文件.tar.bz2  被备份的文档..
+  -- tar -Jcf 备份文件.tar.xz  被备份的文档..
+
+[root@goodgame ~]# tar -zcf /opt/file.tar.gz  /home/  /boot/
+[root@goodgame ~]# ls /opt/
+
+[root@goodgame ~]# tar -jcf /opt/abc.tar.bz2 /etc/passwd /etc/shadow
+[root@goodgame ~]# ls /opt/
+
+[root@goodgame ~]# tar -Jcf /opt/nsd.tar.xz /etc/group /etc/gshadow
+[root@goodgame ~]# ls /opt/
+
+
+tar进行释放（解包）
+格式：   
+    tar  选项  /路径/压缩包的名字   选项  释放的路径
+
+[root@goodgame ~]# tar -xf /opt/file.tar.gz -C /mnt/
+[root@goodgame ~]# ls /mnt
+[root@goodgame ~]# ls /mnt/etc/
+
+[root@goodgame ~]# tar -xf /opt/abc.tar.bz2 -C /mnt/
+[root@goodgame ~]# ls /mnt
+[root@goodgame ~]# ls /mnt/etc/
+
+[root@goodgame ~]# tar -xf /opt/nsd.tar.xz -C /mnt/
+[root@goodgame ~]# ls /mnt
+[root@goodgame ~]# ls /mnt/etc/
+
+案例：使用tar工具完成以下备份任务：
+ ---创建一个名为/root/backup.tar.bz2 的归档文件
+ ---其中包含usr/local/目录中的内容
+---tar归档必须使用bzip2进行压缩
+
+[root@goodgame ~]# tar -jcf /root/backup.tar.bz2  /usr/local/
+tar: 从成员名中删除开头的“/”
+[root@goodgame ~]# ls /root
+
+[root@goodgame ~]# tar -tf /root/backup.tar.bz2  
+
+
+###########################################################
+NTP时间同步
+
+NTP网络时间协议
+Network  Time Protocol
+  ---NTP服务器为客户机提供标准时间
+  ---NTP客户机需要与NTP服务器保持沟通
+
+
+
+
+NTP客户机：指定NTP服务器位置               (装包）-->（修改i配置文件）-->（起服务）
+虚拟机server：
+1.安装chrony软件，可以和NTP服务器沟通
+[root@goodgame ~]# rpm -q chrony
+chrony-1.29.1-1.el7.x86_64
+
+2.修改主配置文件
+[root@goodgame ~]# vim /etc/chrony.conf 
+  大多数配置文件中，以#开头的为注释信息
+#server 0.rhel.pool.ntp.org        iburst：快速相应
+#server 1.rhel.pool.ntp.org iburst
+#server 2.rhel.pool.ntp.org iburst
+server classroom.example.com iburst   #指定服务端位置
+
+3.重启服务（程序）
+[root@goodgame ~]# systemctl restart chronyd
+[root@goodgame ~]# systemctl enable chronyd   #设置服务开机自起
+
+    daemon守护神；（希腊神话中）半人半神的精灵；[计]守护进程
+
+4.验证：
+[root@goodgame ~]# date -s '2222-10-12'
+2222年 10月 12日 星期六 00:00:00 CST
+[root@goodgame ~]# date
+2222年 10月 12日 星期六 00:00:07 CST
+[root@goodgame ~]# systemctl restart chronyd
+[root@goodgame ~]# date
+2222年 10月 12日 星期六 00:00:26 CST
+[root@goodgame ~]# date
+2019年 01月 04日 星期五 16:43:36 CST
+
+############################################################
+
+cron计划任务（周期性任务）
+  -- 编辑：crontab -e  [-u 用户名]
+  -- 查看：crontab -l  [-u 用户名]
+  -- 查看：crontab -r  [-u 用户名]
+
+用途：按照设置的时间间隔为用户反复执行某一项固定的系统任务
+软件包： cronie、crontabs
+系统服务：crond
+日志文件：/var/log/crond   #详细记录（一般排错时用到日志）
+
+*：匹配范围内任意时间
+，：分隔多个不连续的时间点
+-：指定连续时间范围
+/n：指定时间频率，每n....
+
+
+
+如何编写crontab任务记录
+  分  时  日  月  周       任务命令行（绝对路径）
+  *   *   *   *   *     poweroff
+   30  8    *    *    * 
+   20  8    *    *    1-5    #分为*时，表示每分钟执行一次
+   20  8    *    *    1，3，5 
+   34  1     *    
+
+
+案例：每分钟记录当前系统时间，写入/opt/time.txt
+
+
+[root@server0 ~]# crontab -e -u root
+no crontab for root - using an empty one
+crontab: installing new crontab
+[root@server0 ~]# ls /var/spool/cron/
+root
+[root@server0 ~]# cat /var/spool/cron/root 
+*  *  *  *  *  date >> /opt/time.txt
+[root@server0 ~]# cat /opt/time.txt 
+
+
+
+
+
+
+
+
+
+

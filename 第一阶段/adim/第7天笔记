@@ -1,0 +1,235 @@
+附加权限（一共3个）
+
+Set UID 一般用于攻击方面
+
+附加在属主的 x 位上
+----属主的权限标识会变为 s      （身份会变成root，如朕亲临）
+----适用于可执行文件，Set UID可以让使用者具有文件属主的身份及部分权限 
+--总结：传递所有者身份
+
+[root@server0 ~]# ls /usr/bin/touch
+/usr/bin/touch
+[root@server0 ~]# /usr/bin/touch a.txt
+[root@server0 ~]# ls
+anaconda-ks.cfg  Desktop    Downloads  Pictures  Templates
+a.txt            Documents  Music      Public    Videos
+[root@server0 ~]# cp /usr/bin/touch  /usr/bin/hahach
+[root@server0 ~]# /usr/bin/hahach b.txt
+[root@server0 ~]# ls
+anaconda-ks.cfg  b.txt    Documents  Music     Public     Videos
+a.txt            Desktop  Downloads  Pictures  Templates
+[root@server0 ~]# chmod u+s /usr/bin/hahach 
+[root@server0 ~]# ls -l /usr/bin/hahach
+-rwsr-xr-x. 1 root root 62432 1月   7 09:38 /usr/bin/hahach
+[root@server0 ~]#  su - student
+[student@server0 ~]$ /usr/bin/touch  nsd01.txt
+[student@server0 ~]$ ls -l nsd01.txt
+-rw-rw-r--. 1 student student 0 Jan  7 09:40 nsd01.txt
+[student@server0 ~]$ /usr/bin/hahach nsd02.txt
+[student@server0 ~]$ ls -l nsd02.txt
+-rw-rw-r--. 1 root student 0 Jan  7 09:40 nsd02.txt
+
+#########################################################
+
+Sticky Bit     防止乱删除
+附加在其他人的 x 位上
+---其他人的权限标识会变位 t
+---
+
+
+[root@server0 ~]# mkdir /home/public
+[root@server0 ~]# chmod ugo=rwx /home/public/
+[root@server0 ~]# ls -ld /home/public/
+drwxrwxrwx. 2 root root 6 1月   7 10:13 /home/public/
+[root@server0 ~]# useradd lisi
+[root@server0 ~]# useradd harry
+[root@server0 ~]# useradd natasha
+[root@server0 ~]# chmod o+t /home/public/
+[root@server0 ~]# ls -ld /home/public/
+drwxrwxrwt. 2 root root 40 1月   7 10:18 /home/public/
+
+
+############################################################
+
+改变家目录（不手动创建目录，拷贝别人的家，再修改权限）
+
+
+[root@server0 ~]# useradd tom
+[root@server0 ~]# grep tom /etc/passwd
+tom:x:1004:1004::/home/tom:/bin/bash
+[root@server0 ~]# ls /home/
+harry  lisi  natasha  public  student  tom
+[root@server0 ~]# grep tom /etc/passwd
+tom:x:1004:1004::/home/tom:/bin/bash
+[root@server0 ~]# usermod -d  /opt/abc tom
+[root@server0 ~]# grep tom /etc/passwd
+tom:x:1004:1004::/opt/abc:/bin/bash
+[root@server0 ~]# cp -r /home/natasha  /opt/abc
+[root@server0 ~]# chown -R tom:tom /opt/abc
+[root@server0 ~]# ls -ld /opt/abc/
+drwx------. 5 tom tom 4096 1月   7 10:34 /opt/abc/
+[root@server0 ~]# ls -lA /opt/abc/
+总用量 16
+-rw-------. 1 tom tom  38 1月   7 10:34 .bash_history
+-rw-r--r--. 1 tom tom  18 1月   7 10:34 .bash_logout
+-rw-r--r--. 1 tom tom 193 1月   7 10:34 .bash_profile
+-rw-r--r--. 1 tom tom 231 1月   7 10:34 .bashrc
+drwxr-xr-x. 3 tom tom  17 1月   7 10:34 .cache
+drwxr-xr-x. 3 tom tom  67 1月   7 10:34 .config
+drwxr-xr-x. 4 tom tom  37 1月   7 10:34 .mozilla
+[root@server0 ~]# su - tom
+
+
+######################################################
+查找文本内容
+使用grep命令
+  --grep
+   ---命令行 | grep
+ 
+常用命令选项：
+---- -v，取反匹配
+---- -i，忽略大小写
+
+[root@server0 ~]# grep root /etc/passwd
+[root@server0 ~]# grep ROOT /etc/passwd
+[root@server0 ~]# grep -i ROOT /etc/passwd
+
+[root@server0 ~]# grep man /etc/man_db.conf 
+[root@server0 ~]# grep -i man /etc/man_db.conf
+
+[root@server0 ~]# grep root /etc/passwd
+[root@server0 ~]# grep -v root /etc/passwd
+
+
+-- ^word 以字符串word开头
+-- word$ 以字符串word结尾
+-- ^$       匹配空行
+
+
+[root@server0 ~]# grep root /etc/passwd
+
+[root@server0 ~]# grep ^root /etc/passwd
+
+[root@server0 ~]# grep root$ /etc/passwd
+[root@server0 ~]# grep bash$ /etc/passwd
+
+
+
+[root@server0 ~]# grep ^$ /etc/default/useradd 
+
+[root@server0 ~]# grep -v ^$ /etc/default/useradd 
+
+清显示/etc/default/useradd 文件有效信息（去除空行 去除注释）
+[root@server0 ~]# grep ^# /etc/default/useradd
+[root@server0 ~]# grep -v ^# /etc/default/useradd 
+
+[root@server0 ~]# grep -v ^# /etc/default/useradd | grep -v ^$
+
+]# grep -v ^# /etc/default/useradd | grep -v ^$ > /root/user.txt
+]# cat /root/user.txt
+
+####################################################################
+
+查找文件
+根据预设的条件递归查找对应的文件
+ ---find [目录] [条件1] [-a包括|-o或者] [条件2]...
+
+---常用条件表示：
+    --- -type 类型 （f 文件、d 目录、l快捷方式、c、b）
+
+[root@server0 ~]# find /boot/ -type d
+[root@server0 ~]# find /boot/ -type l
+/boot/grub/menu.lst
+[root@server0 ~]# ls /boot/grub/menu.lst 
+[root@server0 ~]# ls -l /boot/grub/menu.lst
+[root@server0 ~]# find /boot/ -type  f
+
+    --- -name “文档名称”
+
+[root@server0 ~]# find /etc/ -name "passwd"
+
+[root@server0 ~]# find /etc/ -name "tab"
+[root@server0 ~]# find /etc/ -name "*tab
+[root@server0 ~]# find /etc/ -name "*tab*"
+
+
+[root@server0 ~]# mkdir /root/nsd01
+[root@server0 ~]# mkdir /root/nsd02
+[root@server0 ~]# touch /root/nsd1812.txt
+[root@server0 ~]# find /root -name "nsd*"
+
+[root@server0 ~]# find /root -name "nsd*" -a -type f
+/root/nsd1812.txt
+[root@server0 ~]# find /root -name "nsd*"  -type f
+/root/nsd1812.txt
+[root@server0 ~]# find /root -name "nsd*"  -type d
+
+    --- -size +/-文件大小 （k、M、G）
+
+
+
+
+
+
+
+    --- -user  用户名(按照文档所有者查找）
+
+根据名称查找，忽略大小写
+ --- -iname
+
+根据所属组
+--- -group
+
+限制目录查找的深度（最大层数）
+-----maxdepth
+
+[root@server0 ~]# find /etc/ -maxdepth 2 -name "*.conf"
+
+
+根据文件修改时间，都是过去时间
+---- -mtime +10  #10天之前，创建或修改过的文件
+---- -mtime -10  #最近10天之内，创建或修改过的文件
+
+三个月之前的日志？
+[root@server0 ~]# find /var/log -mtime +90
+
+
+#################################################
+处理find找到的结果
+-exec
+
+                                      #管道不支持两个参数的命令
+
+查找/boot目录下大于10M，将其复制到/opt下：
+
+[root@server0 ~]# find /boot/ -size +10M
+[root@server0 ~]# find /boot/ -size +10M  -exec cp {} /opt/ \;
+[root@server0 ~]# ls /opt/
+
+
+查找/etc目录下大于“*tab”结尾的内容，将其复制到/omnt下：
+
+[root@server0 ~]# find /etc/ -name "*tab"
+[root@server0 ~]# find /etc/ -name "*tab" -exec cp {} /mnt/ \;
+[root@server0 ~]# ls /mnt/
+
+案例2：查找并处理文件
+使用find命令完成以下任务
+---找出所有用户 student 拥有的文件
+---把它们拷贝到 /root/findfiles/ 文件夹中
+
+[root@server0 ~]# mkdir /root/findfiles
+[root@server0 ~]# find /  -user student -type f
+[root@server0 ~]# find /  -user student -type f -exec cp {} /root/findfiles/ \;
+[root@server0 ~]# ls -A /root/findfiles/
+
+
+
+
+
+
+
+
+
+
+

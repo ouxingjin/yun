@@ -1,0 +1,357 @@
+2019-02-23
+
+########################################################################
+静态网站: x.mp3  a.doc(ni hao) y.gif(动图) z.jpg,z1.jpg,z2.jpg
+动态网站: 代码写成的脚本（每次重新打开网页，都会重新执行一次脚本），a.php(date) b.jsp(echo ok)
+############################################################################
+1 案例1：部署LNMP环境 （动态网站）
+1.1 问题
+    安装部署Nginx、MariaDB、PHP环境
+    安装部署Nginx、MariaDB、PHP、PHP-FPM；
+    启动Nginx、MariaDB、FPM服务；
+    并测试LNMP是否工作正常。
+
+LNMP---> Linux Nginx Mariadb PHP/python
+易-->难：shell--> python--> php--> java--> c++ --> 汇编
+1.2 方案
+   LNMP（Linux、Nginx、MySQL、PHP）
+    在RHEL7系统中，源码安装Nginx，使用RPM包安装MariaDB、PHP、PHP-FPM软件。
+操作过程中需要安装的软件列表如下：
+     nginx
+     mariadb、mariadb-server、mariadb-devel
+     php、php-fpm、php-mysql
+    备注：mariadb（数据库客户端软件）、mariadb-server（数据库服务器软件）、mariadb-devel（其他客户端软件的依赖包）、php（解释器）、php-fpm（进程管理器服务）、php-mysql（PHP的数据库扩展包）
+  
+************************************************************************************
+php-fpm 能把php当成一个服务，能够自动执行php代码
+    现代化软件都采用模块化设计（100个功能）将每一个功能设计一个独立模块，需要用到哪一个功能，就选择安装哪一个功能。
+*************************************************************************************
+
+步骤一：安装软件
+1）使用yum安装基础依赖包
+[root@proxy ~]# yum -y install gcc openssl-devel pcre-devel
+
+2）源码安装Nginx（如果前面课程中已经安装Nginx，则忽略这一步）
+[root@proxy ~]# useradd -s /sbin/nologin  nginx
+[root@proxy ~]# tar -xvf nginx-1.12.2.tar.gz
+[root@proxy ~]# cd nginx-1.12.2
+[root@proxy nginx-1.12.2]# ./configure   \
+> --user=nginx   --group=nginx \
+> --with-http_ssl_module
+[root@proxy ~]# make && make insta
+
+3）安装MariaDB
+Mariadb在新版RHEL7光盘中包含有该软件，配置yum源后可以直接使用yum安装：
+[root@proxy ~]# yum -y install mariadb mariadb-server mariadb-devel
+
+4）php和php-fpm(该软件包在lnmp_soft中提供)
+[root@proxy ~]# yum -y  install  php   php-mysql
+[root@proxy ~]# yum -y  install php-fpm-5.4.16-42.el7.x86_64.rpm
+
+
+5)测试php是否能用
+[root@proxy lnmp_soft]# vim /usr/local/nginx/html/test.php
+<?php
+$i=33;
+echo $i;
+?>
+[root@proxy ~]# php /usr/local/nginx/html/test.php #输出33
+
+步骤二：启动服务
+1）启动Nginx服务（如果已经启动nginx，则可以忽略这一步）
+   这里需要注意的是，如果服务器上已经启动了其他监听80端口的服务软件（如httpd），则需要先关闭该服务，否则会出现冲突
+[root@proxy ~]# systemctl stop httpd            //如果该服务存在则关闭该服务
+[root@proxy ~]# /usr/local/nginx/sbin/nginx     //启动Nginx服务
+[root@proxy ~]# netstat -utnlp | grep :80
+
+2）启动MySQL服务
+[root@proxy ~]# systemctl start  mariadb        //启动服务器
+[root@proxy ~]# systemctl status mariadb        //查看服务状态
+[root@proxy ~]# systemctl enable mariadb        //设置开机启动
+
+3）启动PHP-FPM服务
+[root@proxy ~]# systemctl start php-fpm          //启动服务
+[root@proxy ~]# systemctl status php-fpm         //查看服务状态
+[root@proxy ~]# systemctl enable php-fpm         //设置开机启动
+
+4）设置防火墙与SELinux（非必需操作，如果有则关闭）
+[root@proxy ~]# firewall-cmd --set-default-zone=trusted
+[root@proxy ~]# setenforce
+
+检测监听端口：
+[root@proxy lnmp_soft]# netstat -utnlp | grep 80    #http端口
+[root@proxy lnmp_soft]# netstat -utnlp | grep 3306  #mariadb数据库端口
+[root@proxy lnmp_soft]# netstat -utnlp | grep 9000  #php-fpm服务端口
+
+
+###########################################################################
+
+2 案例2：构建LNMP平台
+2.1 问题
+沿用练习一，通过调整Nginx服务端配置，实现以下目标：
+     1.配置Fast-CGI支持PHP网页
+     2.创建PHP测试页面，测试使用PHP连接数据库的效果
+
+Nginx结合FastCGI技术即可支持PHP页面架构，如图-2所示。
+
+        因此本案例，需要延续练习一的实验内容，通过修改Nginx及php-fpm配置文件实现对PHP页面的支持。
+        注意，FastCGI的内存消耗问题，一个PHP-FPM解释器将消耗约25M的内存。
+*********************************************************************************
+配置文件
+       如果用户访问的是静态数据
+           那么，nginx直接找到文件，返回给用户
+      如果用户访问的是动态
+           那么，nginx找到文件，转发给9000，php执行代码
+
+         网站的动静分离
+
+程序：下载到硬盘中安装到硬盘的是程序 
+进程：双击程序-->内存（进程）多进程
+线程：在进程底下开多个线程（共享进程的内存---不占用内存）
+***********************************************************************************
+
+vim /usr/local/nginx/conf/nginx.conf
+     location匹配用户的地址栏（从网站的域名后面开始），支持正则表达式,每一个location相当于一个if
+
+http{
+    server {
+     listen 80;
+     server_name www.baidu.com;
+      location /  {找到页面，直接返回}
+      location ~ \.php$ {找到的是php脚本页面，转发给9000}
+   }
+}
+
+
+步骤一： php-fpm配置文件
+1）查看php-fpm配置文件（实验中不需要修改该文件）
+[root@proxy etc]# vim /etc/php-fpm.d/www.conf
+[www]
+listen = 127.0.0.1:9000            //PHP端口号
+pm.max_children = 32                //最大进程数量
+pm.start_servers = 15                //最小进程数量
+pm.min_spare_servers = 5            //最少需要几个空闲着的进程
+pm.max_spare_servers = 32            //最多允许几个进程处于空闲状态
+
+
+步骤二：修改Nginx配置文件并启动服务
+[root@proxy ~]# vim /usr/local/nginx/conf/nginx.conf
+location / {
+            root   html;
+            index  （index.php）  index.html   index.htm;
+#设置默认首页为index.php，当用户在浏览器地址栏中只写域名或IP，不说访问什么页面时，服务器会把默认首页index.php返回给用户，而客户是看不懂脚本代码的
+        }
+ location  ~  \.php$  {
+            root           html;
+            fastcgi_pass   127.0.0.1:9000;  #将请求转发给本机9000端口，PHP解释器
+            #fastcgi_index  index.php;
+            #fastcgi_param   SCRIPT_FILENAME  $document_root$fastcgi_script_name;
+            include        fastcgi.conf;   #调用文件
+        }
+[root@proxy ~]# /usr/local/nginx/sbin/nginx -s reload   #验证配置文件是否写错
+[root@proxy ~]# firefox http://192.168.4.5/test.php     #可以得到处理后的页面
+
+
+步骤三：创建PHP页面，测试LNMP架构能否解析PHP页面
+1）创建PHP测试页面1，可以参考lnmp_soft/php_scripts/test.php：
+[root@proxy ~]# vim /usr/local/nginx/html/test1.php
+<?php
+$i="This is a test Page";
+echo $i;
+?>
+
+2）创建PHP测试页面,连接并查询MariaDB数据库。
+可以参考lnmp_soft/php_scripts/mysql.php:
+
+[root@proxy php_scripts]# cp mysql.php /usr/local/nginx/html/
+[root@proxy php_scripts]# firefox http://192.168.4.5/mysql.php
+
+
+
+3）客户端使用浏览器访问服务器PHP首页文档，检验是否成功：
+[root@client ~]# firefox http://192.168.4.5/test1.php
+[root@client ~]# firefox http://192.168.4.5/test2.php
+
+
+4）LNMP常见问题
+Nginx的默认访问日志文件为/usr/local/nginx/logs/access.log
+Nginx的默认错误日志文件为/usr/local/nginx/logs/error.log
+PHP默认错误日志文件为/var/log/php-fpm/www-error.log
+如果动态网站访问失败，可用参考错误日志，查找错误信息。
+
+ 用户访问---->Nginx --->PHP--->Mysql
+
+2019/02/23 16:03:29 [error] 9272#0: *41 connect() failed (111: Connection refused) while connecting to upstream, client: 192.168.4.10, server: www.a.com, request: "GET /mysql.php HTTP/1.1", upstream: "fastcgi://127.0.0.1:9000", host: "192.168.4.5"
+若提示无法连接--->1.9000服务没有启动、2.防火墙或selinux拒绝了
+
+  若PHP无法连接数据库-->php-mysql(mysqli)
+
+网站的动静分离：静态的自己处理，动态的转发给端口9000
+##########################################################################
+
+3 案例3：地址重写(地址栏被重新改写)
+www.360buy.com---->www.jd.com
+http://www.baidu.com ---->https://www.baidu.com
+www.baidu.com/a.mp3 ----->www.baidu.com/b.mp3(index.html)
+
+3.1 问题
+    沿用练习二，通过调整Nginx服务端配置，实现以下目标：
+    所有访问a.html的请求，重定向到b.html;
+    所有访问192.168.4.5的请求重定向至www.tmooc.cn；
+    所有访问192.168.4.5/下面子页面，重定向至www.tmooc.cn/下相同的页面；
+    实现firefox与curl访问相同页面文件，返回不同的内容。
+
+3.2 方案
+关于Nginx服务器的地址重写，主要用到的配置参数是rewrite：从域名后面开始匹配
+    rewrite regex replacement flag
+    rewrite 旧地址 新地址 [选项]   (在旧地址处支持正则表达式)
+
+步骤一：修改配置文件(访问a.html重定向到b.html)---------网页下的文件改变了，域名没有改变
+1）修改Nginx服务配置：
+[root@proxy ~]# vim /usr/local/nginx/conf/nginx.conf
+....
+server {
+     server_name localhost;
+     rewrite /a.html  /b.html;
+....
+[root@proxy ~]# echo "BB" > /usr/local/nginx/html/b.html
+
+2）重新加载配置文件
+[root@proxy ~]# /usr/local/nginx/sbin/nginx  -s  reload
+
+3）客户端测试
+[root@client ~]# firefox  http://192.168.4.5/a.html
+
+步骤二：访问a.html重定向到b.html（跳转地址栏）
+1）修改Nginx服务配置：
+[root@proxy ~]# vim /usr/local/nginx/conf/nginx.conf
+....
+server {
+     server_name localhost;
+     rewrite /a.html  /b.html redirect;  #地址栏由/a.html 改为了/b.html
+....
+
+2）重新加载配置文件
+[root@proxy ~]# /usr/local/nginx/sbin/nginx  -s  reload
+
+3）客户端测试
+[root@client ~]# firefox  http://192.168.4.5/a.html
+
+
+步骤三：修改配置文件(访问192.168.4.5的请求重定向至www.tmooc.cn) ---可以改变网站的域名
+1) 修改Nginx服务配置
+[root@proxy ~]# vim /usr/local/nginx/conf/nginx.conf
+....
+server {
+     server_name localhost;
+    #rewrite /a.html  /b.html redirect;  #地址栏由/a.html 改为了/b.html
+     rewrite ^/ http://www.tmooc.cn/;
+....
+
+2）重新加载配置文件
+[root@proxy ~]# /usr/local/nginx/sbin/nginx  -s  reload
+
+3）客户端测试（真机测试）
+[root@room11pc25 ~]# firefox  http://192.168.4.5
+
+
+
+步骤四：修改配置文件(访问192.168.4.5/下面子页面，重定向至www.tmooc.cn/下相同的页面)
+1) 修改Nginx服务配置
+         shell 正则（保留） \(\) () 复制 --->目的是为了粘贴 (aa)(bb)(cc) \1\2\3
+
+[root@proxy ~]# vim /usr/local/nginx/conf/nginx.conf
+....
+server {
+     server_name localhost;
+    #rewrite /a.html  /b.html redirect;  #地址栏由/a.html 改为了/b.html
+     rewrite ^/(.*)$ http://www.tmooc.cn/$1;  #将前面的(.*)$ 粘贴在 $1位置
+....
+2）重新加载配置文件
+[root@proxy ~]# /usr/local/nginx/sbin/nginx  -s  reload
+
+3）客户端测试（真机测试）
+[root@room11pc25 ~]# firefox  http://192.168.4.5
+
+
+步骤五：修改配置文件(实现curl和火狐访问相同链接返回的页面不同)
+1) 创建网页目录以及对应的页面文件
+[root@proxy ~]# echo "I am Normal page" > /usr/local/nginx/html/test.html
+[root@proxy ~]# mkdir  -p  /usr/local/nginx/html/firefox/
+[root@proxy ~]# echo "firefox page" > /usr/local/nginx/html/firefox/test
+
+2) 修改Nginx服务配置
+[root@proxy ~]# vim /usr/local/nginx/conf/nginx.conf
+.. ..
+server {
+        listen       80;
+        server_name  localhost;
+location / {
+    root   html;
+index  index.html index.htm;
+}
+#这里，~符号代表正则匹配，*符号代表不区分大小写
+if ($http_user_agent ~* firefox) {            //识别客户端firefox浏览器
+rewrite ^(.*)$ /firefox/$1;
+}
+}
+
+3）重新加载配置文件
+[root@proxy ~]# /usr/local/nginx/sbin/nginx  -s  reload
+
+
+4）客户端测试
+[root@client ~]# firefox  http://192.168.4.5/test.html
+[root@client ~]# curl     http://192.168.4.5/test.html
+
+
+
+5）地址重写格式【总结】
+rewrite 旧地址 新地址 [选项];
+常见可选项：可以防止冲突
+   last 不再读其他rewrite
+   break 不再读其他语句，结束请求
+   redirect 临时重定向
+   permament 永久重定向
+
+******************************************************************************
+电脑：http://www.163.com （访问  宽屏幕）
+手机：http://www.163.com   两者访问相同的域名，结果不一样 （访问  窄）
+       vim /usr/local/nginx/html/test.html      （宽）
+       vim /usr/local/nginx/html/手机/test.html （窄）
+     if (如果是手机访问) {
+   rewrite /test.html  /手机/test.html
+        }
+电脑：firefox http://www.baidu.com/test.html
+手机：firefox http://www.baidu.com/test.html
+*******************************************************************************
+分析日志内容代表的意思：
+   客户端ip  用户名  访问时间   访问了（什么页面）那里  访问的网页有没有找到 及 网页大小  客户端信息
+
+
+ #log_format  main  '$remote_addr - $remote_user [$time_local] "$request" '
+ #                  '$status $body_bytes_sent "$http_referer" '
+ #                  '"$http_user_agent" "$http_x_forwarded_for"';
+
+ #access_log  logs/access.log  main;
+
+
+192.168.4.10 - - [25/Feb/2019:10:39:31 +0800] "GET /favicon.ico HTTP/1.1" 404 169 "-" "Mozilla/5.0 (X11; Linux x86_64; rv:52.0) Gecko/20100101 Firefox/52.0"
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,336 @@
+2019-03-04
+
+#####################################################################################
+
+DAS （直连存储：需要有线与主板连,主板上的接口是有限的----容量有限）ide、sas、sata、SSD（固态）
+网络存储：
+NAS：文件系统（ext4，ntfs）  samba，nfs（共享一个文件夹）
+SAN：块       iscsi    EMC（全球最好的）--DELL
+FC：光纤  支持光纤的网卡、交换机、路由器
+iSCSI
+
+分布式存储：ceph
+
+       阿里（去IOE）2011   IBM  Oracle  EMC（最奢侈）
+
+##################################################################################
+1 案例1：配置iSCSI服务
+本案例要求先搭建好一台iSCSI服务器，并将整个磁盘共享给客户端：
+	服务器上要额外配置一块硬盘
+	服务端安装target，并将新加的硬盘配置为iSCSI 的共享磁盘
+	在客户端上安装initiator，挂在服务器iSCSI，要求实现开机自动挂载
+
+步骤一：安装iSCSI服务器软件
+1）使用yum安装targetcli软件包
+[root@proxy ~]# yum  -y  install  targetcli
+[root@proxy ~]# yum info targetcli   #查看软件信息
+
+步骤二：通过命令行配置iSCSI服务
+1）真实主机准备底层存储磁
+[root@proxy ~]# parted /dev/vdb mklabel gpt
+[root@proxy ~]# parted /dev/vdb mkpart primary 1 100%  #将整个硬盘划分为一个主分区
+
+2)使用targetcli定义后端存储
+设置需要将哪个设备共享给其他主机，这里将/dev/vdb1设置为后端共享磁盘。
+[root@proxy ~]# targetcli
+/>backstores/block create store /dev/vdb1
+/>iscsi / create iqn.2018-01.cn.tedu:server1
+/>iscsi/iqn.2018-01.cn.tedu:server1/tpg1/acls create iqn.2018-01.cn.tedu:client1
+             #将iqn.2018-01.cn.tedu:client1给客户端，客户端持有该字串才能访问，相当于是密码
+/>iscsi/iqn.2018-01.cn.tedu:server1/tpg1/luns create /backstores/block/store 
+/> iscsi/iqn.2018-01.cn.tedu:server1/tpg1/portals/ create 0.0.0.0    #任意ip能访问 
+/> saveconfig 
+/> exit
+
+步骤三：服务管理
+1）启动服务
+[root@proxy ~]# systemctl  {start|restart|stop|status} target
+[root@proxy ~]# systemctl enable target
+
+2）查看端口信息
+[root@proxy ~]# ss -utlnp | grep :3260
+
+3）关闭防火墙与SELinux
+[root@proxy ~]# systemctl stop firewalld
+[root@proxy ~]# setenforce 0
+
+
+步骤四：客户端访问(web1作为客户端的角色)
+1）客户端安装软件并启动服务
+[root@web1 ~]# yum -y install iscsi-initiator-utils
+
+2）设置本机的iqn名称
+[root@web1 ~]# vim /etc/iscsi/initiatorname.iscsi 
+InitiatorName=iqn.2018-01.cn.tedu:client    #注意：必须跟服务器上配置的ACL一致！
+
+3）发现远程target存储  ----- 提示：参考man iscsiadm！
+[root@web1 ~]# iscsiadm -m discovery -t st -p 192.168.2.5
+[root@web1 ~]# iscsiadm -m node -L all
+[root@web1 ~]# lsblk
+[root@web1 ~]# systemctl restart iscsi 
+
+4）分区、格式化、挂载
+[root@web1 ~]# parted /dev/sda mklabel gpt
+[root@web1 ~]# parted /dev/sda mkpart primary 1 800
+[root@web1 ~]# mkfs.xfs /dev/sda1
+[root@web1 ~]# mount /dev/sda1  /mnt
+[root@web1 ~]# echo "fff" >/mnt/t.tx    #可以在进行写入文件等，但不会是写在web1上
+[root@web1 ~]# umount  /mnt
+
+步骤四：附加课外实验：多台FTP或者http主机使用共享存储。
+1) web1操作(延续前面步骤三的实验)：
+[root@web1 ~]# mkdir /var/ftp/
+[root@web1 ~]# mount /dev/sda1  /var/ftp/
+[root@web1 ~]# yum -y install vsftpd
+[root@web1 ~]# sed -i 's/^#anon/anon/' /etc/vsftpd/vsftpd.conf
+
+[root@web1 ~]# chmod 777  /var/ftp/pub
+[root@web1 ~]# systemctl start vsftpd
+[root@web1 ~]# systemctl enable vsftpd
+
+2) 真实主机访问web1的FTP共享，并任意上传一个文件到FTP服务器
+
+
+iscsi块共享：不能多人同时使用，要看到别人写的东西，需umount后，再次进行挂载；只读的时候可以多人
+
+####################################################################################
+2 案例2：部署Multipath多路径环境  - ----把两块硬盘合成一块
+通过Multipath，实现以下目标：
+	在共享存储服务器上配置iSCSI，为应用服务器共享存储空间
+	应用服务器上配置iSCSI，发现远程共享存储
+	应用服务器上配置Multipath，将相同的共享存储映射为同一个名称
+
+proxy ：192.168.4.5  192.168.2.5
+web1：  192.168.4.100   192.168.2.100
+
+在客户端上有192.168.4.5的ip再次进行发现磁盘操作，然后重启iscsi，再进行lsblk操作
+[root@web1 ~]# iscsiadm -m discovery -t st -p 192.168.4.5
+[root@web1 ~]# systemctl restart iscsi
+[root@web1 ~]# lsblk      #可以发现会多了一个/dev/sdb的磁盘
+
+步骤四：配置Multipath多路径（客户端与服务器有多条网络线路）
+1）安装多路径软件包
+[root@web1 ~]# yum list | grep multipath
+device-mapper-multipath.x86_64         0.4.9-111.el7                       Server
+device-mapper-multipath-libs.i686      0.4.9-111.el7                       Server
+device-mapper-multipath-libs.x86_64    0.4.9-111.el7                       Server
+[root@web1 ~]# yum install -y device-mapper-multipath
+
+2）生成配置文件
+[]# cd /usr/share/doc/device-mapper-multipath-0.4.9/
+[]# ls multipath.conf
+[]# cp multipath.conf  /etc/multipath.conf  #配置文件默认不在/etc下，需从其他地方拷贝过来
+
+3）获取wwid
+    登陆共享存储后，系统多了两块硬盘，这两块硬盘实际上是同一个存储设备。应用服务器使用哪个都可以，但是如果使用sdb时，sdb对应的链路出现故障，它不会自动切换到sda。
+   为了能够实现系统自动选择使用哪条链路，需要将这两块磁盘绑定为一个名称。
+   通过磁盘的wwid来判定哪些磁盘是相同的。
+取得一块磁盘wwid的方法如下：
+[root@web1 ~]# /usr/lib/udev/scsi_id --whitelisted --device=/dev/sda 
+36001405ab30d20dbb7b479b9b29941dc    # UUID号不会变
+
+4）修改配置文件
+首先声明自动发现多路径
+[root@web1 ~]# vim /etc/multipath.conf
+.....
+multipaths {
+        multipath {
+                wwid     36001405ab30d20dbb7b479b9b29941dc
+                alias    goodgame   #给唯一的设备的UUID号设置一个别名
+    }
+  }
+
+步骤五：启用Multipath多路径，并测试
+注意：如果做案例1时，已经挂载了iSCSI设备，一定要先umount卸载掉再启动多路径。
+1）启动Multipath，并设置为开机启动
+[root@web1 ~]# systemctl start multipathd
+[root@web1 ~]# systemctl enable multipathd
+
+2）检查多路径设备文件
+如果多路径设置成功，那么将在/dev/mapper下面生成名为mpatha的设备文件：
+[root@web1 ~]# ls /dev/mapper/
+control  mpatha  mpatha1
+
+3)对多路径设备文件执行分区、格式化、挂载操作
+提示：如果前面已经对iscsi做过分区操作，则这里可以直接识别到mpatha1（就不需要再次分区了）。
+[root@web1 ~]# fdisk -cu /dev/mapper/mpatha
+
+新的分区名称应该是/dev/mapper/mpathap1，如果该文件不存在，则执行以下命令进行配置的重新载入
+
+
+4）验证多路径
+查看多路径，sda和sdb都是running状态。
+[root@web1 ~]# multipath -rr(-ll)
+
+关闭某个链路后，再次查看效果，此时会发现sdb为运行失败状态。
+[root@web1 ~]# nmcli connection down eth1
+[root@web1 ~]# multipath -rr
+
+****************************************************************
+忘记了vim /etc/init...需要执行：【】#systemctl restart iscsid
+***************************************************************
+去掉实验环境：
+[root@web1 ~]# iscsiadm --mode node --targetname iqn.2018-01.cn.tedu:server1 --portal 192.168.4.5:3260 --logout
+[root@web1 ~]# iscsiadm --mode node --targetname iqn.2018-01.cn.tedu:server1 --portal 192.168.2.5:3260 --logout
+
+服务端：
+[root@proxy ~]# systemctl stop target
+[root@proxy ~]# rm  -rf /etc/target/saveconfig.json（可不执行，只停了服务即可）
+最后将添加的磁盘2删除
+
+######################################################################################
+3 案例3：配置并访问NFS共享
+服务器利用NFS机制发布2个共享目录，要求如下：
+	将目录/root共享给192.168.2.100，客户机的root用户有权限写入
+	将/usr/src目录共享给192.168.2.0/24网段，只开放读取权限
+从客户机访问NFS共享：
+	分别查询/挂载上述NFS共享目录
+	查看挂载点目录，并测试是否有写入权限
+
+步骤一：配置NFS服务器，发布指定的共享
+1）确认服务端程序、准备共享目录
+软件包nfs-utils用来提供NFS共享服务及相关工具，而软件包rpcbind用来提供RPC协议的支持，这两个包在RHEL7系统中一般都是默认安装的：
+[root@proxy ~]# rpm  -q  nfs-utils  rpcbind   #注册服务用
+[root@proxy ~]# ls  -ld  /root  /usr/src/
+
+2）修改/etc/exports文件，添加共享目录设置
+     默认情况下，来自NFS客户端的root用户会被自动降权为普通用户，若要保留其root权限，注意应添加no_root_squash控制参数(没有该参数，默认root会被自动降级为普通账户)；另外，限制只读的参数为ro、可读可写为rw，相关配置操作如下所示：
+[root@proxy ~]# vim  /etc/exports
+/root           192.168.2.100(rw,no_root_squash)  
+                     #若无no_root_squash，会导致客户端挂载的时候没有权限
+/usr/src        192.168.2.0/24(ro)
+********************************************************************************
+/root    192.168.2.100(rw,no_root_squash)
+/usr/src  192.168.2.0/24(ro,all_squash)   #不管谁访问都自动降级为普通用户
+********************************************************************************
+3）启动NFS共享相关服务，确认共享列表
+依次启动rpcbiind、nfs服务：
+[root@proxy ~]# systemctl restart rpcbind  ;  systemctl enable rpcbind
+[root@proxy ~]# systemctl restart nfs ;  systemctl enable nfs
+
+rpcbind:111端口  记录不固定的端口
+注册端口
+      nfs：
+
+步骤二：从客户机访问NFS共享
+1）启用NFS共享支持服务
+客户机访问NFS共享也需要rpcbind服务的支持，需确保此服务已开启：
+[root@web1 ~]# systemctl restart rpcbind  ;  systemctl enable rpcbind
+
+2）查看服务器提供的NFS共享列表
+[root@web1 ~]# showmount  -e  192.168.2.5
+
+3）从客户机192.168.2.100访问两个NFS共享，并验证权限
+将远程的NFS共享/root挂载到本地的/root5文件夹，并验证可读可写：
+[root@web1 ~]# mkdir  /root5                              //建立挂载点
+[root@web1 ~]# mount  192.168.2.5:/root  /root5          //挂载NFS共享目录
+
+
+######################################################################################
+
+4 案例4：编写udev规则
+编写udev规则，实现以下目标：
+	当插入一个U盘时，该U盘自动出现一个链接称为udisk
+	U盘上的第1个分区名称为udisk1，以此类推
+	终端上出现提示信息”udisk plugged in”
+
+问题：加载一个USB设备后，系统可能识别为sda也可能识别为sdb，能不能固定呢？
+    对于Linux kernel 2.6及更新的操作系统版本会将设备的相关信息动态写入/sys文件系统中，而udev程序可以通过读取这些设备系信息，并根据自己的udev规则进行设备管理器，实现如下功能：
+	1.处理设备命名   #/dev,/sda,/sdb...这些名字由udev决定
+	2.决定要创建哪些设备文件或链接
+	3.决定如何设置属性
+	4.决定触发哪些事件
+udev默认规则存放在/etc/udev/rules.d目录下，通过修改此目录下的规则实现设备的命名、属性、链接文件等。
+
+  udev动态设备管理：动态发现设备，再将设备添加到/dev目录下；有设备，/sys下就会多东西，
+                      拔掉设备，/dev、/sys下就少东西
+
+步骤一：编写udev规则
+####1）准备USB设备（如果使用真实机演示，下面为虚拟机添加USB设备可以忽略）
+
+1）查看设备属性
+加载USB设备的同时实时查看设备的相关属性，可以使用monitor指令。
+[root@proxy ~]# udevadm monitor --property   #在插入u盘前执行，对于已经插入的设备无反映
+
+如果设备已经加载则无法使用monitor查看相关属性。可以使用下面的命令查看设备属性。
+[root@proxy ~]# udevadm info --query=path --name=/dev/sda   #查看/block/sdb
+/devices/pci0000:00/0000:00:14.0/usb1/1-10/1-10:1.0/host9/target9:0:0/9:0:0:0/block/sdb
+
+[root@proxy ~]# udevadm info --query=property --path=/block/sdb  #查看sdb的信息
+
+单独查看某个磁盘分区的属性信息。
+[root@proxy ~]# udevadm info --query=property --path=/block/sdada1
+
+
+2）编写udev规则文件（实现插拔USB设备时有屏幕提示信息）
+注意：修改规则文件不能照抄，这里的变量都是需要根据实际情况而修改的！！！
+每个设备的属性都有所不同！！！一定要根据前面查询的info信息填写。
+[root@proxy ~]# vim  /etc/udev/rules.d/70-usb.rules
+ENV{ID_VENDOR}=="Kingston",ACTION=="add",RUN+="命令"   #当插入一个Kingston的U盘时，执行命令
+ENV{ID_VENDOR}=="Kingston",ACTION=="remove",RUN+=""
+  #ENV{}条件
+ENV{ID_VENDOR}=="Kingston",ACTION=="add",RUN+="/usr/bin/systemctl start httpd"
+
+ENV{ID_VENDOR}=="Kingston",ACTION=="remove",RUN+="/usr/bin/systemctl stop httpd"
+
+判断条件1  判断条件2   判断条件3
+evn{品牌}=="xx",env{序列号}=="yy",
+
+	选项	        	值
+	==			表示匹配
+	!=			表示不匹配
+	=			指定赋予的值
+	+=			添加新值（在原有的基础上添加）
+	：=			指定值，且不允许被替换
+	NAME="udisk"	定义设备名称
+	SYMLINK+="datal"	定义设备的别名
+	OWNER="student"	定义设备的所有者
+	GROUP="student"	定义设备的所属组
+	MODE="777"		定义设备的权限
+	ACTION=="add"	判断设备的操作动作（添加或删除设备等）
+	KERNEL=="sd[a-z]1" 判断设备的内核名称
+	RUN+=程序		为设备添加程序
+
+udev常用替代变量：
+%k：内核所识别出来的设备名，如sdb1
+%n：设备的内核编号，如sda3中的3
+%p：设备路径，如/sys/block/sdb/sdb1
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

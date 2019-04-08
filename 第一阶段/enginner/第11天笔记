@@ -1,0 +1,364 @@
+环境准备
+
+虚拟机server和desktop关闭防火墙
+[root@server0 ~]# firewall-cmd --set-default-zone=trusted 
+[root@desktop0 ~]# firewall-cmd --set-default-zone=trusted
+
+Samba服务基础 （跨平台的共享，Linux与windows共享）----反向编译思想
+Samba 软件项目
+---用途：为客户机提供共享使用的文件夹
+---协议：SMB（TCP 139）--验明身份、CIFS（TCP 445）--数据传输
+所需软件包：samba
+系统服务：smb
+
+管理共享帐号    ----必须依赖于系统用户
+Samba用户---专用来访问共享文件夹的用户
+--采用独立设置的密码-----Samba密码
+--但需要提前建立同名的系统用户（可以不设登陆密码）
+
+使用pdbedit管理工具
+--添加用户：pdbedit  -a 用户名
+--查询用户：pdbedit  -L [用户名]
+--删除用户：pdbedit  -x 用户名
+
+
+虚拟机server
+1.安装软件
+    [root@server0 ~]# yum -y install samba
+
+2.创建Samba共享用户
+
+[root@server0 ~]# useradd -s /sbin/nologin harry
+[root@server0 ~]# useradd -s /sbin/nologin  kenji
+[root@server0 ~]# useradd -s /sbin/nologin  chihiro
+[root@server0 ~]# pdbedit -a harry   #添加为Samba共享用户
+[root@server0 ~]# pdbedit -a kenji
+[root@server0 ~]# pdbedit -a chihiro
+[root@server0 ~]# pdbedit -L    #查看Samba所有共享用户
+[root@server0 ~]# pdbedit -x chihiro  #删除
+
+
+隐藏共享：客户端浏览不到，需要知道完整的共享名
+
+3.创建共享的文件夹
+
+[root@server0 ~]# mkdir /common
+[root@server0 ~]# echo 123 > /common/1.txt
+[root@server0 ~]# ls /common/
+1.txt
+
+4.修改配置文件 /etc/samba/smb.conf
+[自定义共享名]
+path = 文件夹绝对路径
+; public = no|yes  //默认no
+; browseable = yes|no  //默认yes
+; read only = yes|no   //默认yes
+; write list = 用户1 .. ..//默认无
+; valid usera = 用户1.. ..//默认任何用户
+; hosts allow = 客户机地址..
+; hosts deny = 客户机地址
+
+
+[root@server0 ~]# vim /etc/samba/smb.conf 
+再vim命令模式下：输入大写的G 直接到全文的最后一行
+[common]     #共享名
+path = /common  #共享的实际路径
+
+5.重启smb服务
+[root@server0 ~]# systemctl restart smb
+[root@server0 ~]# systemctl enable smb   #设置为开机自起
+
+
+6.修改SELinux策略，布尔值（功能的开关）
+---需要加 -P 选项才能实现永久设置（需要较大的内存）
+[root@server0 ~]#getenforce  #查看SELinux状态
+Enforcing
+
+[root@server0 ~]# getsebool -a | grep samba
+[root@server0 ~]# setsebool samba_export_all_ro --> off  on
+[root@server0 ~]# getsebool -a | grep samba
+
+
+
+
+客户端：虚拟机desktop
+1.安装软件包samba-client
+[root@desktop0 ~]# yum -y install samba-client
+
+2.列出共享资源：
+  --smbclient -L 服务器地址
+
+
+
+[root@desktop0 ~]# smbclient -L 172.25.0.11
+Enter root's password:   #无需输入  直接回车
+Anonymous login successful
+Domain=[MYGROUP] OS=[Unix] Server=[Samba 4.1.1]
+
+	Sharename       Type      Comment
+	---------       ----      -------
+	common          Disk      
+	IPC$            IPC       IPC Service (Samba Server Version 4.1.1)
+Anonymous login successful
+
+3.连接到共享文件夹
+  --smbclient -U 用户名  //服务器地址/共享名
+
+[root@desktop0 ~]# smbclient -U harry //172.25.0.11/common
+Enter harry's password: 
+Domain=[MYGROUP] OS=[Unix] Server=[Samba 4.1.1]
+smb: \> 
+
+#######################################################################
+
+客户端：更加科学方便的访问SMB共享
+
+1.安装cifs-utils软件包,让本机客户端支持cifs文件系统
+
+[root@desktop0 ~]# yum -y install cifs-utils.x86_64 
+
+2.创建挂载点
+[root@desktop0 ~]# mkdir /mnt/nsd01
+[root@desktop0 ~]# ls /mnt/nsd01
+
+[root@desktop0 ~]# mount -o user=harry,pass=123 //172.25.0.11/common  /mnt/nsd01
+[root@desktop0 ~]# ls  /mnt/nsd01/
+
+[root@desktop0 ~]# df -h
+[root@desktop0 ~]# ls /mnt/nsd01/
+
+
+达到数据同步的效果
+#########################################################
+实现开机自动挂载
+  _netdev:网络设备（---声明设备为网络设备，请在开始起用时，首先开启网络相关服务，
+             具备网络参数后，再进行挂载本设备）
+
+1.书写/etc/fstab文件
+虚拟机desktop
+[root@desktop0 ~]# vim /etc/fstab 
+//172.25.0.11/common /mnt/nsd01 cifs defaults,user=harry,pass=123,_netdev 0 0
+
+[root@desktop0 ~]# umount /mnt/nsd01/
+[root@desktop0 ~]# df -h
+[root@desktop0 ~]# mount -a
+[root@desktop0 ~]# df -h
+
+####################################################################33
+
+总结：搭建简单的Samba共享
+服务端：
+ 1.修改防火墙默认的区域为trusted
+ 2.安装软件Samba
+ 3.创建Samba共享用户
+ 4.创建共享的目录，修改配置文件/etc/samba/smb.conf
+ 5.重启smb服务
+ 6.修改SELinux布尔值，开放功能
+ 7.修改本地目录权限，赋于相应用户读写执行权限
+客户端：
+  1.修改防火墙默认的区域为trusted
+  2.安装软件cifs-utils支持cifs文件系统
+  3.手动挂载或开机自动挂载
+
+#######################################################################33
+
+实现读写的Samba共享
+  
+虚拟机server：
+ 1.发布目录/devops，共享名为devops
+	[root@server0 ~]# mkdir /devops
+	[root@server0 ~]# echo haha > /devops/a.txt
+	[root@server0 ~]# ls /devops/
+	[root@server0 ~]# vim /etc/samba/smb.conf	
+	[devops]
+	path = /devops
+	write list = chihiro
+2.重启smb服务
+  [root@server0 ~]# systemctl restart smb
+3.修改SELinux布尔值，开放读写功能
+ [root@server0 ~]# getsebool -a | grep samba
+ [root@server0 ~]# setsebool samba_export_all_rw on
+ [root@server0 ~]# getsebool -a | grep samba
+
+4.修改本地目录权限赋于chihiro用户可以写入
+  [root@server0 ~]# setfacl -m u:chihiro:rwx /devops/
+  [root@server0 ~]# getfacl /devops/
+
+
+客户端：虚拟机desktop
+1.开机自动挂载访问
+[root@desktop0 ~]# vim /etc/fstab 
+//172.25.0.11/devops /mnt/nsd02 cifs defaults,user=chihiro,pass=123,_netdev 0 0
+
+[root@desktop0 ~]# mkdir /mnt/nsd02
+[root@desktop0 ~]# mount -a
+[root@desktop0 ~]# df -h
+
+[root@desktop0 ~]# ls /mnt/nsd02
+[root@desktop0 ~]# mkdir /mnt/nsd02/kk
+[root@desktop0 ~]# ls /mnt/nsd02
+
+######################################################################
+实现读写的Samba共享
+在虚拟机server上搭建smb服务：发布共享目录/abc，共享名为test
+ -允许kenji用户对该共享可以读写
+ -允许kenji
+
+
+
+############################################################################
+
+multiuser机制，共享文件夹的多用户访问
+   在客户端挂载时，利用权限较小用户进行验证挂载，必要时可以变成权限较大的用户身份
+
+挂载参数调整
+mount.cifs 的挂载参数
+--multiuser，提供对客户端多个用户身份的区分支持
+--sec=ntlmssp add|update -u 共享用户名 服务器地址
+
+
+
+
+
+#############################################################################
+
+配置只读的NFS共享（Linux与Linux之间共享)
+Network Fils System，网络文件系统
+--用途：为客户机提供共享使用的文件夹
+--协议：NFS
+
+所需软件包：nfs-utils
+系统服务：nfs-sefver
+
+1.安装软件包
+[root@goodgame ~]# yum -y install nfs-utils  #默认已安装
+
+2.修改/etc/exports
+--文件夹路径  客户机地址（权限） 客户机地址（权限）..
+[root@server0 ~]# mkdir /public
+[root@server0 ~]# echo 244 > /public/1.txt
+[root@server0 ~]# ls /public/
+1.txt
+[root@server0 ~]# vim /etc/exports
+
+3.重起nfs-server服务
+[root@server0 ~]# systemctl restart nfs-server
+[root@server0 ~]# systemctl enable nfs-server
+
+客户端：虚拟机desktop
+ 
+1.手动挂载
+[root@desktop0 ~]# mkdir /mnt/pub
+[root@desktop0 ~]# mount 172.25.0.11:/public /mnt/pub
+[root@desktop0 ~]# df -h
+
+2.开机自动挂载
+[root@desktop0 ~]# vim /etc/fstab 
+172.25.0.11:/public /mnt/pub nfs defaults,_netdev 0 0 
+
+[root@desktop0 ~]# umount /mnt/pub/
+[root@desktop0 ~]# df -h
+[root@desktop0 ~]# mount -a
+[root@desktop0 ~]# df -h
+
+
+
+[root@desktop0 ~]# showmount -e 172.25.0.11
+Export list for 172.25.0.11:
+/public *
+
+
+######################################################################
+
+
+配置IPV6地址：
+     IP地址作用：唯一标识网络一台主机（一个节点）
+
+IPV4地址：由32个二进制组成，点分十进制，最终用十进制数表示
+          例：192.168.1.1
+
+IPV6地址：由128个二进制组成，冒号分16进制数，最终用16进制数表示
+          例：2003：ac18：0000：0000：0000：0000:0000:0305
+           2003:ac18::0305  
+
+
+配置IPV6地址：
+
+[root@server0 ~]# nmcli connection modify 'System eth0' 
+    ipv6.method manual ipv6.addresses 2003:ac18::305/64 
+    connection.autoconnect yes
+[root@server0 ~]# nmcli connection up 'System eth0' 
+[root@server0 ~]# ping6 -c 4 2003:ac18::305
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

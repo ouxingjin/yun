@@ -1,0 +1,251 @@
+2019-01-15
+
+
+############################################################################
+安全web服务（https：安全的超文本传输协议  443）----加密传输
+
+PKI公钥基础设施
+Public Key Infrastructure，公钥基础设施
+--公钥：主要用来加密数据
+--私钥：主要用来解密数据（与相应的公钥匹配）
+--数字证书：证明拥有者的合法性/权威性（单位名称、有效期、公钥、颁发机构及签名...）
+——Certificate Authority，数字证书授权中心：负责证书的申请/审核/颁发/鉴定/撤销等管理工作
+
+
+实现HTTPS加密的条件
+*HTTPS加密Web通信（tcp 443端口）
+---Secure Sockets Layer，安全套接字层
+---Transport Layer Security，安全传输层协议
+
+
+构建安全的web服务
+1.部署网站证书（营业执照）
+[root@server0 ~]# cd /etc/pki/tls/certs/   #专门存放证书的目录文件
+[root@server0 certs]# wget http://classroom.example.com/pub/tls/certs/server0.crt
+[root@server0 certs]# ls 
+
+2.部署根证书（授权中心的信息）
+root@server0 ~]# cd /etc/pki/tls/certs/
+[root@server0 certs]# wget http://classroom.example.com/pub/example-ca.crt
+[root@server0 certs]# ls 
+
+3.部署私钥（用于解密）
+[root@server0 certs]# cd /etc/pki/tls/private/   #专门存放私钥的目录文件
+[root@server0 private]# wget http://classroom.example.com/pub/tls/private/server0.key
+[root@server0 certs]# ls 
+
+4.安装mod_ssl软件包，支持加密通信
+
+[root@server0 private]# yum -y install mod_ssl
+[root@server0 ~]# rpm -ql mod_ssl
+/etc/httpd/conf.d/ssl.conf
+
+5.修改配置文件/etc/httpd/conf.d/ssl.conf
+补充：vim 末行模式 输入 : set nu #开启行号功能
+
+[root@server0 ~]# vim /etc/httpd/conf.d/ssl.conf 
+
+ 59 DocumentRoot "/var/www/html"   #指定存放网页路径
+ 60 ServerName www0.example.com:443 #指定网站的域名
+指定网站证书
+ 100 SSLCertificateFile /etc/pki/tls/certs/server0.crt
+指定私钥
+ 107 SSLCertificateKeyFile /etc/pki/tls/private/server0.key
+指定根证书（授权中心的信息）
+ 122 SSLCACertificateFile /etc/pki/tls/certs/example-ca.crt
+
+6.重起httpd服务
+[root@server0 ~]# systemctl restart httpd
+
+验证：
+
+[root@desktop0 ~]# firefox https://www0.example.com
+
+
+###################################################################
+邮件服务器的构建
+
+*电子邮件服务器的基本功能
+  -- 为用户提供电子邮箱存储空间（用户名@邮件域名）
+  -- 处理用户发出的邮件 ——传递给收件服务器
+  -- 处理用户收到的邮件 ——投递到邮箱
+
+   SMTP：用户发出的邮件协议  25
+   POP3：用户接收的邮件协议  110
+
+注册一个 163 或在 sina 邮箱---显专业、入行深
+
+  DNS服务器：虚拟机classroom 
+      server0.example.com
+   邮箱帐号：lisi@server0.example.com
+ 
+虚拟机server0：构建邮件服务
+1.安装软件包postfix
+
+
+2.修改配置文件
+[root@server0 ~]# vim /etc/postfix/main.cf 
+ 补充：vim 末行模式 输入 ：set nu #开启行号功能
+
+ 98 myorigin = server0.example.com #默认补全域名后缀
+ 115 inet_interfaces = all   #本机所有网卡都提供邮件服务
+ 164 mydestination = server0.example.com  #此字段的值，判断为本域邮件
+       （目标，收件人）
+
+3.重起postfix服务
+[root@server0 ~]# systemctl restart postfix
+
+4.测试收-发邮件
+
+
+使用mail命令发信/收信
+mail发信操作
+---mail -s '邮件标题'   -r  发件人  收件人
+---echo ‘邮件正文' | mail -s '邮件标题'   -r  发件人  收件人
+
+mail收信操作
+—mai [-u 用户名]
+
+[root@server0 ~]# mail -s 'test01' -r yg xln
+hehehahalele sdfi
+dfkjdgj 
+.    #只有一个点代表提交
+EOT
+[root@server0 ~]# mail -u xln
+
+
+##############################################################
+parted规划分区
+    MBR：最多有4个主分区  最大支持的磁盘 2TB   1TB=1024GB  ----用fdisk分区
+
+    GPT：最多有128个主分区  最大支持的空间18EB
+                     1EB=1024PB
+                     1PB=1024TB
+
+[root@server0 ~]# lsblk
+[root@server0 ~]# parted /dev/vdb 
+(parted) mktable gpt     #指定分区模式为GPT
+(parted) print           #输出分区表信息
+(parted) mkpart          #划分新的分区
+分区名称？  []? haha
+文件系统类型？  [ext2]? ext4                                              
+起始点？ 0                                                                
+结束点？ 2G  
+警告: The resulting partition is not properly aligned for best performance.
+忽略/Ignore/放弃/Cancel? Ignore  
+(parted) unit gb   #指定单位为GB
+(parted) print  
+
+(parted) mkpart 
+分区名称？  []? haha                                                      
+文件系统类型？  [ext2]? ext4                                              
+起始点？ 2G                                                               
+结束点？ 4G
+(parted) print 
+(parted) quit 
+[root@server0 ~]# lsblk
+
+
+什么是交换空间
+*相当于虚拟内存
+ -- 当物理内存不够用时，使用磁盘空间来模拟内存
+ -- 在一定程度上缓解内存不足的问题
+
+ -- 交换分区：以空闲分区充当的交换空间
+ -- 交换文件：以文件模拟的设备充当的交换空间
+
+1.查看交换空间的大小
+[root@server0 ~]# swapon -s
+
+2.格式化交换文件系统
+[root@server0 ~]# mkswap /dev/vdb1
+[root@server0 ~]# mkswap /dev/vdb2
+[root@server0 ~]# blkid /dev/vdb1
+[root@server0 ~]# blkid /dev/vdb2
+
+3.启用交换分区
+[root@server0 ~]# swapon /dev/vdb1
+[root@server0 ~]# swapon -s
+[root@server0 ~]# swapon /dev/vdb2
+
+[root@server0 ~]# swapoff /dev/vdb2  #关闭交换分区
+[root@server0 ~]# swapon -s
+
+4.开机自动启用交换分区
+[root@server0 ~]# vim /etc/fstab 
+   /dev/vdb1 swap swap defaults 0 0
+   /dev/vdb2 swap swap defaults 0 0
+
+[root@server0 ~]# swapoff /dev/vdb1
+[root@server0 ~]# swapoff /dev/vdb2
+[root@server0 ~]# swapon -a   #专用于检测swap分区是否书写正确
+[root@server0 ~]# swapon -s
+
+
+##############################################################33
+配置聚合连接（链路聚合  网卡组队）
+    作用：备份网卡设备
+
+---作用1：轮询
+---作用2：热备份
+
+
+虚拟机server：制作链路聚合
+1.建立虚拟网卡team0   参考 man teamd.conf
+[root@server0 ~]# nmcli connection add type team con-name team0 ifname team0 autoconnect yes config '{ "runner": {"name":"activebackup"}}'
+
+  nmcli connection  添加   类型   team(组队)
+    配置文件名  team0  网卡名  team0   每次开机自动启用
+    配置运行模式   热备份模式
+
+
+# ifconfig    #查看team0网卡信息
+# cat /et(tab)/sysco(tab)/netw(tab)-(tab)/ifcfg-team0
+    生成的网卡配置文件信息
+
+如果有敲错，一定要删除 :  nmcli connection delete team0
+
+
+注意：如果有敲错，一定要删除：nmcli connecton delete team0
+
+2.添加成员
+[root@server0 ~]# nmcli connection add type team-slave con-name team0-1 ifname eth1 master team0 
+
+[root@server0 ~]# nmcli connection add type team-slave con-name team0-2 ifname eth2 master team0 
+
+解析：nmcli connection 添加 类型为  team的成员 配置文件名 
+
+
+
+注意：如果有敲错，一定要删除：nmcli connecton delete team0-1
+
+
+
+3.配置team0的IP地址
+[root@server0 ~]# nmcli connection modify team0 ipv4.method manual ipv4.addresses 192.168.1.1/24 connection.autoconnect yes
+
+[root@server0 ~]# nmcli connection up team0  #激活配置
+[root@server0 ~]# ifconfig 
+
+[root@server0 ~]# teamdctl team0 state  #专用于查看team0信息
+
+#######################################################################
+[root@server0 ~]# ifconfig eth2 down   #关闭eth2网卡
+[root@server0 ~]# ifconfig eth2 up     #重新激活eth2网卡
+[root@server0 ~]# teamdctl team0 state
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,458 @@
+2019.1.12
+
+###########################################################################
+
+iSCSI网络磁盘（为将来 集群 作准备）
+工作模式：
+Internet SCSI，网际SCSI接口-----默认端口 3260
+--- 一种基于C/S架构的虚拟磁盘技术
+-- 服务器提供磁盘空间，客户机连接并当成本地磁盘使用
+
+iSCSI磁盘的构成
+backstore，后端存储
+---对应到服务端提供实际存储空间的设备，需要起一个管理名称
+
+target，磁盘组
+---是客户端的访问目标，作为一个框架，由多个lun组成
+
+lun，逻辑单元（组合后端和磁盘组）
+---每一个lun需要关联到某一个后端存储设备，在客户端会视为一块虚拟硬盘
+   大冰箱--->纸制的箱子--->木制箱子
+收件方：看到时--->木制箱子
+
+
+ISCSI Qualified Name 名称规范
+-- iqn.yyyy-mm.倒序域名：自定义标识
+--用来识别target 磁盘组  
+
+
+一 划分分区,h划分一个5G的主分区
+ [root@server0 ~]# fdisk /dev/vdb
+ [root@server0 ~]# lsblk
+NAME   MAJ:MIN RM SIZE RO TYPE MOUNTPOINT
+vda    253:0    0  10G  0 disk 
+└─vda1 253:1    0  10G  0 part /
+vdb    253:16   0  10G  0 disk 
+└─vdb1 253:17   0   5G  0 part
+[root@server0 ~]# ls /dev/vdb1
+
+二 安装软件包,进行配置
+1.安装服务端软件targetcli
+  [root@server0 ~]# yum -y install targetcli
+
+2.进行配置
+[root@server0 ~]# targetcli 
+/> ls
+  A:建立backstore，后端存储,并且设置后端存储的名字
+/> backstores/block create name=nsd dev=/dev/vdb1
+/> ls
+
+   B：建立target磁盘组（木制的箱子）
+/> iscsi/ create iqn.2016-02.com.example:server0
+              -- iqn.yyyy-mm.倒序域名：自定义标识
+/> ls
+  
+    C:lun进行关联(将后端存储，放入target磁盘组）
+/> iscsi/iqn.2016-02.com.example:server0/tpg1/luns create /backstores/block/nsd 
+Created LUN 0.
+/> ls
+
+     D：设置ACL访问控制，设置客户端声称的名字（服务端和客户端设置一致）
+/> iscsi/iqn.2016-02.com.example:server0/tpg1/acls create iqn.2019-01.con.example:desktop0
+
+/> ls
+    
+     E:开启端口，设置在（那个）IP地址提供服务
+/> iscsi/iqn.2016-02.com.example:server0/tpg1/portals create 172.25.0.11
+Using default IP port 3260
+Created network portal 172.25.0.11:3260.
+/> exit  #自动保存退出
+Global pref auto_save_on_exit=true
+Last 10 configs saved in /etc/target/backup.
+Configuration saved to /etc/target/saveconfig.json  #保存到相应的文件
+
+三 重起服务
+[root@server0 ~]# systemctl restart target
+[root@server0 ~]# systemctl enable target
+
+
+客户端：虚拟机desktop
+ 一.安装软件包
+  所需软件包：iscsi-initiator-utils
+   Yum可以补全包名：
+       前期1：该软件包没有被安装
+       前期2：必须要有Yum缓存（yum repolist）
+[root@server0 ~]# yum repolist   #生成缓存
+[root@server0 ~]# yum -y install iscsi(tab)  #已经默认安装，不需要再安装
+
+[root@server0 ~]# rpm -q iscsi-initiator-utils
+iscsi-initiator-utils-6.2.0.873-21.el7.x86_64
+
+
+ 二.进行配置指定客户端声称的名字
+    1.修改配置文件指定客户端声称的名字
+[root@desktop0 ~]# vim /etc/iscsi/initiatorname.iscsi    
+InitiatorName=iqn.2019-01.com.example:desktop0
+
+  2.重起iscsid服务，刷新客户端声称的名字
+  [root@desktop0 ~]# systemctl  daemon-reload ----重起报错时添加这一条
+  [root@desktop0 ~]# systemctl restart iscsid
+
+
+三 发现与加载共享存储
+1.发现共存存储
+  Linux查看命令帮助的方法：man iscsiadm
+    全文查找/example   按n项下跳转匹配
+
+   Ctrl    - ：减小字体
+   Ctrl   Shift   + ：变大字体
+
+
+
+[root@desktop0 ~]# iscsiadm --mode discoverydb --type sendtargets --portal 172.25.0.11 --discover
+
+2.加载共享存储
+[root@desktop0 ~]# lsblk 
+[root@desktop0 ~]# systemctl restart iscsi  #重起客户端服务
+[root@desktop0 ~]# systemctl enable iscsi
+[root@desktop0 ~]# lsblk 
+
+######################################################3
+
+总结：搭建ISCSI共享存储
+服务端：
+  1.修改防火墙默认区域trusted
+  2.划分新的分区
+  3.安装软件包targetcli
+  4.运行targetcli进行配置
+     A：建立后端
+     B：建立target磁盘组
+     C:建立关联
+     D：设置ACL访问控制
+     E：开启IP地址和端口
+  5.重起target服务
+
+客户端：
+  1.修改防火墙默认区域trusted
+  2.安装软件包iscsi-initiator-utils
+  3.修改配置文件，指定客户端声称的名字，重起iscsid服务
+  4.运行命令进行发现共享存储（参考 man iscsiadm）
+  5.重起iscsi服务，加载共享存储
+
+
+
+
+
+
+
+###############################################################################
+
+数据库服务基础
+
+     数据库：存放数据的仓库
+
+  在数据库中有许多的库，在每个库中会有许多的表格
+
+
+
+什么是数据库
+----DB，数据库：一批数据的集合，主流的数据多用来存放关系型表格数据
+-------关系型数据：一二维表格记录大量实体的属性信息
+----DBMS，数据库管理系统（用来操作和管理数据库的大型软件平台）
+
+常见的关系型 数据库管理系统
+  ----微软的SQL Server
+ ---IBM的DB2
+  -----甲骨文的 Oracl、MySQL
+  -----社区开源版MariaDB
+
+
+
+一、部署mariadb数据库服务器
+1.安装软件mariadb-server：提供服务端
+[root@server0 ~]# yum -y install mariadb-server
+
+2.重起mariadb服务
+[root@server0 ~]# systemctl restart mariadb
+[root@server0 ~]# systemctl enable mariadb
+
+
+二、mariadb数据库简单操作
+
+[root@server0 ~]# mysql  #不支持任何命令  全新的开始---每一条命令要一';'结尾
+                                   所有命令不支持tab健  show查看  create创建
+                          drop删除
+MariaDB [(none)]> show databases; #显示所有库
+
+MariaDB [(none)]> create database nsd; #创建nsd库
+MariaDB [(none)]> show databases;
+
+MariaDB [(none)]> drop database nsd;  #删除nsd库
+MariaDB [(none)]> show databases;
+
+MariaDB [(none)]> create database nsd1812;  #创建nsd1812库
+MariaDB [(none)]> show databases;
+
+
+MariaDB [(none)]> use nsd1812;  #进入nsd1812
+
+MariaDB [nsd1812]> show tables; #显示当前数据库中的所有表格
+MariaDB [nsd1812]> show databases; #显示数据库中所有的库
+
+
+MariaDB [nsd1812]> use mysql;  #进入mysql库 
+MariaDB [mysql]> show tables;  #显示当前数据库中的所有表格
+
+
+############################################################
+为数据库管理员设置密码
+
+数据库管理员：用户名root，用户信息放在mysql库user表
+
+系统管理员：用户名root，用户信息放在/etc/passwd
+(两者只是同名而已，各不相干，没有可比性)
+
+
+为数据库帐号修改密码
+--mysqladmin [-u用户名]  [-p[旧密码]] password '新密码'
+
+root@server0 ~]# mysqladmin -u root password '123456'
+
+[root@server0 ~]# mysql -u root -p   #交互式进入（要输入密码）
+Enter password: 
+
+[root@server0 ~]# mysql -u root -p123456  #非交互式进入
+
+
+MariaDB主配置文件/etc/my.cnf
+禁止监听，只服务于本机
+~]#vim /etc/cnf
+[mysqld]
+skip-networking  //跳过网络监听
+.. ..
+~]#systemctl restart mariadb
+
+
+
+
+#####################################################################
+
+##导出/备份
+
+
+
+
+导入/恢复到数据库
+--mysql [-u用户名] [-p[密码]] 数据库名 < 备份文件.sql
+
+1.下载备份文件
+[root@server0 ~]# wget http://classroom.example.com/pub/materials/users.sql
+
+2.将数据导入nsd1812库中
+[root@server0 ~]# mysql -u root -p123456 nsd1812 < users.sql
+
+3.进入数据库查看表格是否生存
+[root@server0 ~]# mysql -u root -p
+Enter password: 
+MariaDB [(none)]> use nsd1812;  #切换到nsd1812库
+MariaDB [nsd1812]> show tables;  #显示所有表格
++-------------------+
+| Tables_in_nsd1812 |
++-------------------+
+| base              |
+| location          |
++-------------------+
+
+
+############################################################
+表格操作： insert（增）  delete（删） update（更改） select（查）
+    表记录：行
+    表字段：列
+
+表查询的操作：
+   select  表字段  from  库名.表名
+
+MariaDB [(none)]> use nsd1812;
+MariaDB [nsd1812]> show tables;
+MariaDB [nsd1812]> select * from base;
+MariaDB [[nsd1812]> select * from nsd1812.location;
+
+MariaDB [mysql]> select * from nsd1812.location;
+
+
+查看表结构：desc 表名 （查看大表格）
+MariaDB [nsd1812]> desc base;
+MariaDB [nsd1812]> desc location;
+
+
+MariaDB [nsd1812]> use mysql
+MariaDB [mysql]> desc user;
+MariaDB [mysql]> select user,host,password from user;
+
+
+查询base表 密码为123的人是谁？
+
+select 表字段  from  库名.表名  where 表字段='值'
+
+MariaDB [nsd1812]> select * from base where password='123';
+MariaDB [nsd1812]> select * from base where password='456';
+MariaDB [nsd1812]> select * from base where name='james';
+
+MariaDB [nsd1812]> select id,name from base where password='123'
+
+MariaDB [mysql]> select * from nsd1812.base where password='123';
+
+##########################################################################
+用户授权设置
+— mariaDB [(none)]> 交互指令
+
+— GRANT 权限列表 ON 数据库名.表名 TO 用户名@客户机地址  identified  BY ‘密码’;
+ 
+
+案例：除了 root 用户，此nsd1812数据库只能被用户lisi 查询，此用户的密码为123
+
+MariaDB [mysql]> grant select on nsd1812.* to lisi@localhost identified by '123';
+
+MariaDB [mysql]> select user,host,password from mysql.user;
+
+
+最终验证：
+
+[root@server0 ~]# mysql -u lisi -p123
+
+MariaDB [(none)]> select * from nsd1812.base;
+MariaDB [(none)]> exit
+
+[root@server0 ~]# mysql -u root -p123
+
+#############################################################################
+
+案例5：使用数据库查询
+1.在系统server0 上使用数据库 nsd1812，并使用相应的SQL 查询以回答下列问题
+1）密码是 solicitous 的人的名字
+MariaDB [(none)]> use nsd1812
+MariaDB [nsd1812]> select * from base;
+
+MariaDB [nsd1812]> select * from base where password='solicitous';
+
+MariaDB [nsd1812]> select id,name from base where password='solicitous'
+
+
+2）有多少人的姓名是Barbara 同时居住在Sunnylave?
+
+MariaDB [nsd1812]> select * from base,location where base.name='barbara' and location.city='sunnyvale' and base.id=location.id;
+
+MariaDB [nsd1812]> select count(*) from base,location where base.name='barbara' and location.city='sunnyvale' and base.id=location.id;
+
+
+MariaDB [nsd1812]> insert base values ('6','barbara','789');
+MariaDB [nsd1812]> select * from base;
+MariaDB [nsd1812]> insert location values ('6','sunnyvale');
+MariaDB [nsd1812]> select * from location;
+
+
+
+
+案例：禁止空密码root用户访问 mariadb 数据库
+[(none)]> use mysql
+[mysql]> select user,host,password from user;
+[mysql]> select user,host,password from where password='';
+
+
+[mysql]> delete from user where password='';
+
+[mysql]> select user,host,password from user;
+
+[mysql]> flush privileges;  #刷新user表所有记录
+
+
+[root@server0 ~]# mysql -u root -h server0.example.com
+ERROR 1130 (HY000): Host 'server0.example.com' is not allowed to connect to this MariaDB server
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,237 @@
+Linux系统管理员
+要求具备从事Linux行业的初级/入门级技能
+  -- 侧重于单个服务器的配置和管理
+  -- 可以对Linux主机进行基础的管理工作
+  -- 比如创建用户、设置权限、管理磁盘、文档备份与恢复、管理系统任务、配置网络地址、
+    安装软件包、访问其他服务器等
+
+Linux系统工程师
+要求具备从事Linux行业的中级技能
+  -- 侧重于多个服务器的应用部署即管理
+  -- 既能对Linux主机进行基础管理工作，还可以配置Web、邮件、文件等服务器，并实现安全运行
+  -- 比如SELinxux、防火墙、各种网站部署、网络磁盘、资源共享、多网卡聚合、
+     用户环境定制、基础Shell脚本、基础数据库运维等
+
+
+
+预装虚拟机说明
+每个学员机上有三台预先配置好的虚拟机
+ -- server :作为练习用服务器
+ -- desktop :作为练习用客户机
+ -- classroom :提供DHCP分配IP地址/网关/DNS/软件素材等资源
+
+    优先开启虚拟机classroom,优先一秒钟即可
+
+真机使用rht-vmctl辅助工具
+ 控制教学用虚拟机
+  --格式：rht-vmctl  控制指令  虚拟机名
+  --常用控制指令：
+ ]#rht-vmctl reset classroom  //先重置资源服务器
+ ]#rht-vmctl reset server     //再重置练习用服务器虚拟机
+ ]#rht-vmctl reset desktop    //再重置练习用客户机
+
+常用控制指令： reset（还原）、poweroff（强制断电）、start（开机）
+
+虚拟机server：管理员的密码 redhat
+ 1.查看系统版本：RHEL7.0
+ 2.查看主机名  ：Server0.example.com
+ 3.查看eth0的IP地址:172.25.0.11/24
+
+虚拟机Desktop：管理员的密码 redhat
+ 1.查看系统版本：RHEL7.0
+ 2.查看主机名  ：desktop0.example.com
+ 3.查看eth0的IP地址:172.25.0.10/24
+
+#############################################################33
+利用真机进行远程管理两台虚拟机
+ ---真机可以ping通
+[  ]#ping 172.25.0.11
+[  ]#ping 172.25.0.10
+
+二 进行远程管理
+ 补充快捷键：ctrl+shift+T 快速开启一个新的终端
+
+[  ]#ssh -X root@172.25.0.11
+ -X :在远程管理时，可以运行对方的图形程序
+[  ]#firewall-conf   #防火墙图形程序
+
+
+三 为真机设置永久别名
+永久别名配置：/root/.bashrc   #开启一个新的终端才会生效
+
+root@room11pc1 ~]# vim /root/.bashrc 
+[root@room11pc1 ~]# head -3 /root/.bashrc 
+# .bashrc
+alias gos='ssh -X root@172.25.0.11'
+alias god='ssh -X root@172.25.0.10'
+
+####################################################################
+零散软件管理
+
+一 从虚拟机classroom获得软件包 （装与系统版本相应的软件包）
+                           共享的服务：FTP和Web
+  虚拟机classroom已经搭建Web服务，共享RHEL7.0光盘所有内容
+
+1.虚拟机server进行访问：
+[   ]#firefox classroom.example.com
+
+http://classroom.example.com/content/rhel7.0/x86_64/dvd/Packages/
+   建议用真机访问网页，不占用虚拟机的使用
+
+2.将软件包进行下载
+下载软件包
+ -- wget 软件包的URL网址
+ --wget  软件包的URL网址 -O(大写）  /目录路径/新文件名
+利用真机的浏览器打开：classroom.example.com
+ 按ctrl+f 当前网页查找vsftpd 右击复制链接地址
+[root@server0 ~]# wget http://classroom.example.com/content/rhel7.0/x86_64/dvd/Packages/vsftpd-3.0.2-9.el7.x86_64.rpm
+
+3.安装软件包
+RPM Package Manager,RPM包管理器
+--rpm  -q  软件名...  #查询软件包是否安装
+--rpm  -ivh 软件名(只有安装时包名要打全）... #安装.rpm结尾的软件包 
+--rpm  -ql 软件名...  #查询安装清单 
+--rpm  -e  软件名...  #删除软件包
+出现警告：系统不认识红帽签名认证
+
+#############################
+了解：导入红帽签名信息
+[root@server0 ~]# wget http://classroom.example.com/content/rhel7.0/x86_64/dvd/RPM-GPG-KEY-redhat-release  #下载签名认证
+
+[root@server0 ~]# rpm --import RPM-GPG-KEY-redhat-release  #导入签名认证
+
+
+
+######################################################################3
+Yum软件包仓库
+服务：  自动解决依赖关系安装软件包
+
+服务端：1.众多的软件包  2.仓库数据文件（数据清单） 3.搭建Web服务或FTP服务
+                 ---（两者都在光盘中）
+          总结：搭建Web服务或FTP服务，共享光盘所有内容
+                Web服务使用协议：
+                      http:超文本传输协议
+                      https:安全超文本传输协议
+                FTP服务使用协议：
+                       FTP：文件传输协议
+
+客户端： 虚拟机server指定服务端位置
+
+  修改配置文件（写）： vim  /etc/yum.repos.d/*.repo
+  客户端配置文件，错误的文件会影响正确的配置文件,
+     ]#rm -rf /etc/yum.repos.d/*      #清空文件里面的内容
+     ]#vim  /etc/yum.repos.d/*.repo
+[ak47]                        #仓库标识
+name=ak47.1                   #仓库描述信息
+baseurl=http://classroom.example.com/content/rhel7.0/ 
+x86_64/dvd/                   #指定服务端具体位置（可以任意改变）
+enabled=1                     #是否起用本文件
+gpgcheck=0                    #是否起用检测红帽签名信息
+[root@server0 ~]# yum repolist  #列出仓库内容
+
+Yum仓库使用
+1.安装软件包
+[root@server0 ~]# yum -y install httpd
+
+2.卸载软件包
+[root@server0 ~]# yum  remove  httpd
+[root@server0 ~]# yum  remove  dhcp
+
+3.清空Yum缓存
+[root@server0 ~]# yum clean all
+
+
+Yellowdog Update Manager,黄狗升级管理器
+  yum repolist              //列仓库
+  yum list [软件名]..        //列软件
+  yum  clean  all           //清缓存
+  yum  -y install  软件名..   //安装软件
+  yum  -y remove   软件名..   //卸载软件
+
+##########################################################################
+升级内核（把新的内核安装即可）
+1.下载新的内核软件包
+[root@server0 ~]# wget http://classroom.example.com/content/rhel7.0/x86_64/errata/Packages/kernel-3.10.0-123.1.2.el7.x86_64.rpm
+
+
+[root@server0 ~]# rpm -ivh kernel-3.10.0-123.1.2.el7.x86_64.rpm 
+[root@server0 ~]# reboot    #修改后重启才能生效
+[root@room11pc1 ~]# ssh -X root@172.25.0.11 #远程上server
+[root@server0 ~]# uname -r   #查看内核版本
+3.10.0-123.1.2.el7.x86_64
+
+##########################################################################
+配置网络（永久配置）
+
+一  永久设置主机名（编写新文件）
+[root@server0 ~]# vim /etc/hostname
+[root@server0 ~]# hostname
+goodgame
+[root@server0 ~]# 登出
+[root@room11pc1 ~]# ssh -X root@172.25.0.11 #远程上server
+[root@goodgame ~]# 
+
+二 永久配置IP地址（有三种方法）  子网掩码   网关地址
+网卡配置文件：vim /etc/sysconfig/network-scripts/ifcfg-eth0
+
+通过命令nmcli进行配置
+1.利用nmcli命令，进行查看网卡识别的名称
+[root@goodgame ~]# nmcli connection show
+名称         UUID                                  类型            设备 
+System eth0  5fb06bd0-0bb0-7ffb-45f1-d6edd65f3e03  802-3-ethernet  eth0 
+[root@goodgame ~]# 
+
+2.利用nmcli命令，进行配置
+[root@goodgame ~]# nmcli connection modify "System eth0" ipv4.method manual ipv4.addresses "172.25.0.119/24 172.25.0.254" connection.autoconnect  yes
+
+]#nmcli  connection 修改‘网卡名称’ipv4.方法  手工配置 ipv4.addresses地址
+ "IP地址/子网掩吗  网关地址"  connection.autoconnec yes 每次开机自动起用配置
+
+3.激活配置
+]#nmcli connection up "S(tab)"
+]#ifconfig
+
+三 DNS服务器地址(将域名解析为IP地址）
+  告知本机解析域名，去寻找那台机器
+[root@goodgame ~]# vim /etc/resolv.conf  #指定永久DNS服务器（立即生效）
+       nameserver 172.25.254.254
+[root@goodgame ~]# cat /etc/resolv.conf
+nameserver 172.25.254.254   #只能解析classroom、desktop及server
+
+测试DNS解析的命令
+[root@goodgame ~]# nslookup
+[root@nsd ~]# nslookup classroom.example.com
+[root@nsd ~]# nslookup desktop0.example.com 
+
+网络参数配置顺序：
+   首先配置主机名，然后配置IP地址  子网掩码  网关地址, 最后指定永久DNS服务器
+
+查看网关地址命令:
+[root@nsd ~]# route
+    Gateway        
+      172.25.0.254  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

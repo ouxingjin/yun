@@ -1,0 +1,184 @@
+2019-01-25
+
+#################################################################
+数据链路层解析
+
+一、 数据链路层（数据帧）
+ ip  192.168.0.1   32位二进制
+ mac 物理地址 硬件地址（12位十六进制）48位二进制------一台机器的mac地址只有一个
+   52:54:00:f8:f9:d7
+   52-54-00-f8-f9-d7
+   5254-00f8-f9d7
+mac 用来标识一台物理设备   全球唯一
+
+0123456789ABCDEF
+mac地址要向相关组织申请，交版权费
+
+网络传输数据的三种方式：
+单播：1对1
+组播：1对多
+广播：1对所有
+
+（1）以太网MAC地址
+*用来识别一个以太网上的某个单独的设备或一组设备
+
+（2）以太网帧格式
+*数据链路层的协议数据单元
+mtu：最大传输单元----从标准的数据帧得来
+
+目的地址  源地址   类型/长度    数据             帧校验序列
+  6字节    6字节     2字节    46～1500字节         4字节
+
+
+二、以太网交换机
+ 
+（1）什么是交换机
+
+交换机工作原理：
+1.学习：MAC地址表是交换机通过学习接收的数据帧的源MAC地址来形成的
+2.广播：如果目标地址在MAC地址表中没有，交换机就向除接收到该数据帧的
+         接口外的其他所有接口广播该数据帧
+3.转发：交换机根据MAC地址表单播转发数据帧
+4.更新：交换机MAC地址簿的老化时间是300s
+         交换机如果发现一个帧的入接口和MAC地址表中源MAC地址的所在接口不同，
+           交换机将MAC地址重新学习到新的接口
+
+
+（2）查看MAC地址表
+
+Switch# show mac-address-table
+
+
+
+（3）广播域
+1.广播域指接收同样广播消息的节点的集合
+2.交换机的所有接口默认属于同一个广播域
+
+
+
+VLAN技术及应用
+一、VLAN
+（1）VLAN概述
+ 1.什么是VLAN
+   -- Virtual LAN （虚拟局域网） 是物理设备上连接的不受物理位置限制的
+     用户的一个逻辑组
+
+2.为什么引入VLAN
+  -- 
+
+
+3.VLAN的作用
+  -- 广播控制
+  -- 增加安全性
+  -- 提高带宽利用
+  -- 降低延迟
+
+4.基于接口划分的静态VLAN
+ VLAN ：可以有0～4095个
+
+在全局配置模式下创建VLAN
+Switch(config)# vlan 2 #创建vlan2
+Switch(config-name)# name xiaoshou  #为vlan2命名
+Switch(config)# interface f0/3  #进入f0/3接口
+Switch(config-if)# switchport access vlan 2  #把接口放入vlan 2
+Switch(config-if)# no switchport access vlan 2 #删除vlan 2
+
+Switch# show vlan brief  #查看vlan摘要信息
+Switch(config)# interface range f0/5-6  #同时进入5、6接口  
+
+
+如何让相同的vlan的服务器互通？
+   将交换机的两个接口放入同一个vlan中。
+Switch(config)# interface f0/7  #进入f0/7接口
+Switch(config-if)# switchport access vlan 3 # 把接口放入vlan3
+
+三、TRUNK（中继链路）----给数据帧打上标识
+
+access  接入链路  承载1个链路
+trunk   中继链路  承载多个vlan
+
+*交换机给每个去往其他交换机的数据帧打上VLAN标识
+
+（2）VLAN标识的种类
+ 1.以太网上实现中继可用两种封装类型
+    --- ISL（Cisco私有协议）
+    --- IEEE 802.1Q （公有）
+
+
+
+四、Teunk配置
+Switch(config)# interface f0/7 #进入接口0/7
+Switch(config-if)# switchport  mode trunk #将接口改为中继链路模式（只需改一个接口即可）
+
+恢复接口默认模式
+Switch(config-if)# switchport  mode trunk
+Switch(config-if)#  no switchport  mode trunk #取消操作
+
+查看接口模式
+Switch# show interface 接口f/07 switchport #查看详细信息
+
+
+交换机与交换机之间才用trunk（中继链路），普通用户用access
+
+
+
+
+六、以太通道
+ 
+
+配置以太通道：
+Switch(config)# interface range fastEthernet 0/1-2
+Switch(config-if-range)#channel-group 1 mode on
+
+测试效果
+Switch(config)#interface f0/1
+Switch(config-if)#shutdown  #关闭接口
+Switch(config-if)#no shutdown #打开接口
+
+查看以太通道的汇总信息：
+Switch#show etherchannel summary  #
+
+
+以太通道配置知道原则
+  1.参与捆绑的接口必须属于同一个vlan，如果是在中继模式下，
+要求所有参加捆绑的接口都是在中继模式下
+  2.如果接口配置的是中继模式，那么应该在链路的两端将通道中的
+所有接口配置成中继模式
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

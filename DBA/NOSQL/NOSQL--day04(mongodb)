@@ -1,0 +1,217 @@
+2019-03-28
+
+###################################################################################
+MongDB介绍：
+  ----介于关系数据库和非关系数据库之间的产品
+	1）一款基于分布式文件存储的数据库，旨在为web应用提供可扩展的高性能数据存储解决方案
+	2）将数据存储为一个文档（类似于json对象，数据结构由键值（key=>value）对组成
+	3）支持丰富的查询表达，可以设置任何属性的索引
+	4）支持副本集，分片
+
+一、部署MongoDB服务
+  1.1 装包：
+	软件包在soft中，免安装，解压后即可使用
+	~]# cd soft/mongodb/
+	~]# mkdir /usr/local/mongodb   #手动创建
+	~]# tar -zxvf mongodb-linux-x86_64-rhel70-3.6.3.tgz
+	~]# cp -r mongodb-linux-x86_64-rhel70-3.6.3/bin /usr/local/mongodb/
+	~]# cd /usr/local/mongodb/
+	~]# mkdir etc	   #创建配置文件存放目录
+	~]# mkdir log         #创建日志文件存放目录
+	~]# mkdir -p data/db  #创建数据库目录
+	~]# ls /usr/local/mongodb/
+		bin  data  etc  log
+
+  1.2 创建配置文件：
+	手动创建服务主配置文件
+	]# vim /usr/local/mongodb/etc/mongodb.conf
+		logpath=/usr/local/mongodb/log/mongodb.log
+		logappend=true   #追加的方式记录日志信息
+		dbpath=/usr/local/mongodb/data/db  #数据库目录
+		fork=true   #守护进程方式运行
+
+  1.3 启动/停止服务
+	]# /usr/local/mongodb/bin/mongod -f /usr/local/mongodb/etc/mongodb.conf 
+	]# netstat -antulp |grep 27017  #查看端口信息，默认为27017
+	]# ps -C mongod  #查看服务进程
+	]# /usr/local/mongodb/bin/mongod -f /usr/local/mongodb/etc/mongodb.conf --shutdown
+alias mstop='/usr/local/mongodb/bin/mongod -f /usr/local/mongodb/etc/mongodb.conf --shutdown'
+alias mstart='/usr/local/mongodb/bin/mongod -f /usr/local/mongodb/etc/mongodb.conf'
+
+  1.4 连接服务：
+	]# /usr/local/mongodb/bin/mongo  #连接服务，默认连接本机的127.0.0.1：27017严格区分大小写
+
+  1.5 修改服务使用的ip地址和端口
+	]# vim /usr/local/mongodb/etc/mongodb.conf
+		logpath=/usr/local/mongodb/log/mongodb.log
+		logappend=true
+		dbpath=/usr/local/mongodb/data/db
+		fork=true
+		port=27051  #端口
+		bind_ip=192.168.4.51  #主机ip地址
+
+  1.6数据库管理：
+	> show dbs      #显示已有的库
+	> use 库名        #切换库，若库不存在在延时创建库
+	> show tables   #显示库下已有的集合
+	> show collections  #显示库下已有的集合
+	> db.dropDatabase() #删除当前所在的库
+	> exit    #退出
+
+   数据库名称规范：
+	1）不能是空字符串（""）
+	2）不能含有''（空格）、.、$、/、\和\0（空字符）
+	3）应该全部小写
+	4）最多64字节
+
+ 1.7集合管理
+	> db.集合名.drop()  #删除集合
+	> db.集合名.save({'',''})  #创建集合，集合不存在时，创建并添加文档
+例子：
+   > db.school.save({'name':'jack','age':'45'})
+
+   集合名命名规范：
+	1）不能是空字符串""
+	2）不能含有\0字符（空字符），此字符表示集合的结尾
+	3）不能以"system."开头，这是为系统集合保留的前缀
+	4）用户创建的集合名字不能含由保留字符
+文档管理：
+	1）> db.集合名.find()    #显示集合中的所有值
+	2) > db.集合名.count()   #统计集合中值的个数
+	3) > db.集合名.insert({'name':'harry'})  #往集合中插入值
+	4) > db.集合名.find({条件})    #按条件显示值
+	5) > db.集合名.findOne()      #返回一条文档
+	6) > db.集合名.remove({})     #删除所有文档
+	7) > db.集合名.remove({条件})  #删除指定文档
+
+
+
+2.2 基本数据类型：字符string/布尔bool/空null
+	1）字符串string
+	   db.user.save({name:"bob"})
+	   db.user.save({班级:"nsd1812",姓名:"张三峰"})
+
+	2) 布尔bool：布尔型有两个值true和false，{x:true}
+	    > db.user.save({name:"张三丰",card:true,girl:false})
+
+	3) 空null：用于表示空值或不存在的字段，{x:null}
+	
+数值/数组array
+	1）数值：
+	   --shell默认使用64位浮点型数值 {x:3.14} 或 {x:3}
+	   --NumberInt （4字节整数）{x:NumberInt(3.45)} #不显示小数位
+	   --NumberLong （8字节整数）{x:NumberLong(3)} #不能是小数
+例：
+> db.user.save({name:"jack",age:33})
+> db.user.save({name:"lucy",grads:33.55})
+> db.user.save({x:NumberInt(5.5)})
+> db.user.save({y:NumberLong(7)})
+
+	2)数组: 数据列表或数据集可以表示为数组
+>db.user.save({name:"jerry",like:["movie","football","eat"]})
+
+代码/日期/对象
+	1）代码
+> db.user.save({lnname:"php",script:function(){/* <?php echo "hello world" ?> */}})
+	2）日期
+> db.user.save({name:"lll",birthday:new Date()})
+	3）对象
+> db.t1.save({name:"mack",num:ObjectId()})
+
+内嵌/正则表达式
+	1）内嵌：文档可以嵌套其他文档，被嵌套的文档作为值来处理
+> db.t2.save({tarena:{addr:"bj",tel:8888888,person:"hanshaoyun"}})
+
+	2）正则表达式
+> db.t3.save({gn:"kn",bds:/^$/})
+
+__________________________________________________________________________
+2.3 数据导入导出
+    1）数据导出
+	格式1：csv格式，必须指定字段名 
+  ]# /usr/local/mongodb/bin/mongoexport [--host IP地址 --port 端口] \
+	-d 库名 -c 集合名 -f 字段名1，字段名2...--type=csv > 目录名/文件名.csv
+例：
+]# bin/mongoexport --host 192.168.4.51 --port 27051 -d test -c user -f name,age 
+  --type=csv > /opt/user.csv
+
+	格式2：
+ ]# /usr/local/mongodb/bin/mongoexport --host IP地址 --port 端口 -d 库名 \
+	-c 集合名 -q '{条件}' -f 字段名1，字段名2..--type=csv > 目录名/文件名.csv
+
+	格式3：json格式，可以不跟字段，导出全部
+  ]# /usr/local/mongodb/bin/mongoexport [--host IP地址 --port 端口] \
+	-d 库名 -c 集合名 --type=json > 目录名/文件名.json
+
+]# bin/mongoexport --host 192.168.4.51 --port 27051 -d test -c t2 --type=json > /opt/user.json
+]# cat /opt/user.json  #查看文件
+
+
+   2）数据导入
+    
+-------51 传给52：json格式
+格式1：
+]# /usr/local/mongodb/bin/mongoimport [--host IP地址 --port 端口] -d 库名 \
+	-c 集合名  --type=json  目录名/文件名.json
+
+]# scp /opt/user4.json 192.168.4.52:/opt/
+52导入数据：
+]# bin/mongoimport --host 192.168.4.52 --port 27052 -d gamedb -c useryy --type=json /opt/user4.json
+
+格式2：
+]# /usr/local/mongodb/bin/mongoimport [--host IP地址 --port 端口] -d 库名 \
+	-c 集合名 --type=csv [--headerline] [--drop] 目录名/文件名.csv
+
+1.导入数据是，若库和集合不存在，则先创建库和集合后再导入数据
+2.若库和集合已存在，则以追加的方式导入数据到集合里
+3.使用--drop选项可以删除原数据后导入新数据，--headerline忽略标题
+
+]# bin/mongoimport --host 192.168.4.52 --port 27052 -d gamedb -c userbb --type=csv --headerline --drop /opt/userd.csv
+
+把文件系统/etc/passwd 文件的内容存储到51主机的userdb库下的user集合里
+]# cp /etc/passwd /root/
+]# sed -i 's/:/,/g' /root/passwd   #修改为符合csv格式要求，将冒号改为逗号
+]# sed -i '1iname,password,uid,gid,comment,homedir,shell' /root/passwd  #在第一行条加标题
+]# head -1 /root/passwd
+]# /usr/local/mongodb/bin/mongoimport --host 192.168.4.51 --port 27051 -d userdb -c user 
+   --type=csv --headerline /root/passwd   #导入数据
+_______________________________________________________________________
+
+2.4 数据备份和恢复
+   1）数据备份
+*备份数据所有库到当前目录下的dump目录下（不指定路径，dump目录会自动生成）
+]# /usr/local/mongodb/bin/mongodump [--host ip地址 --port 端口]
+
+*备份时指定备份的库和备份目录：要先创建存放的目录
+]# mkdir /mdbbak  #创建备份文件存放目录
+]# /usr/local/mongodb/bin/mongodump [--host ip地址 --port 端口] 
+	-d 数据库名 -c 集合名 -o 目录
+
+*查看bson文件内容
+]# /usr/local/mongodb/bin/bsondump  ./dump/t1.bson
+
+   2）数据恢复
+格式：
+]# /usr/local/mongodb/bin/mongorestore --host IP地址 --port 端口 
+  -d 数据库名 [ -c 集合名 ] 备份目录名
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,112 @@
+资源共享 数据通信 提高可靠 提高系统处理能力
+分组交换   tcp/ip  web
+iso  ieee
+wan  lan
+路由器  交换机
+点对点   wan
+星形 
+网状 
+osi
+物理层  数据链路层  网络层  传输层  会话层  标示层  应用层
+tcp/ip
+物理层  数据链路层  网络层  传输层   应用层
+比特流  数据帧         数据包  数据段
+网卡      交换机        路由器   防火墙   pc
+
+双绞线  utp  stp
+cat5   cat5e   cat6  cat7
+t568a  白绿  绿   白橙  蓝  白蓝  橙  白棕 棕
+t568b
+
+console线
+
+用户模式
+特权模式
+全局配置模式
+接口   0/1   0/2
+
+ip   192.168.0.1    
+11000000.10101000.00000000.00000001    32位
+mac 物理地址 硬件地址     48位
+52:54:00:f8:f9:d7
+52-54-00-f8-f9-d7
+5254-00f8-f9d7
+
+0123456789ABCDEF
+
+52-54-00-00-00-01
+
+单播   1对1
+组播   1对多
+广播   1对所有
+
+mtu  最大传输单元
+
+15000
+1500*10
+
+mac  用来标识一个物理设备
+
+PC（windows环境）命令行输入 ipconfig /all 查看mac地址
+Switch#show mac-address-table   //在交换机中查看mac地址表
+
+4096
+0～4095
+1000
+1
+
+在全局配置模式下创建VLAN
+Switch(config)#vlan 2   //创建vlan2
+Switch(config-name)#name xiaoshou   //为vlan2命名
+Switch(config)# interface f0/3   //进入f0/3接口
+Switch(config-if)# switchport access vlan 2   //把接口放入vlan2
+Switch#show vlan brief   //查看vlan摘要信息
+Switch(config)#interface range f0/5-6   //同时进入5、6接口
+Switch(config)# interface f0/7   //进入f0/7接口
+Switch(config-if)# switchport access vlan 3   //把接口放入vlan3
+     考虑问题：如何让相同vlan的服务器互通？
+
+
+access  接入链路     承载1个vlan
+trunk   中继链路     承载多个vlan
+Switch(config)# interface f0/7   //进入f0/7接口
+Switch(config-if)#switchport mode trunk   //将接口改为中继链路模式
+
+SW1#show interface f0/24 switchport    //查看接口详细信息
+
+配置以太通道
+Switch(config)# interface range fastEthernet 0/1-2    //进入1、2口
+Switch(config-if-range)#channel-group 1 mode on   //将两个接口配置为以太通道，通道组号是1
+
+测试效果
+Switch(config)#interface f0/1   
+Switch(config-if)#shutdown     //关闭接口
+Switch(config-if)#no shutdown     //打开接口
+Switch#show etherchannel summary   //查看以太通道汇总信息
+
+配置思路：
+1，将7、8口都加入相同vlan，都配置好trunk
+2，将7、8口组建为以太通道
+3，两台交换机都做相同操作
+
+以太通道配置原则：
+参与捆绑的接口必须属于同一个vlan，如果是在中继模式下，要求所有参加捆绑的接口都是在中继模式下
+如果接口配置的是中继模式，那么应该在链路的两端将通道中的所有接口配置成中继模式
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

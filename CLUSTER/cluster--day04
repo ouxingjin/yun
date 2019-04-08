@@ -1,0 +1,414 @@
+2019-03-07
+
+#############################################################################
+scp 端口 7920
+
+网站架构
+
+用户---->调度器      应用服务器     共享存储NFS，samba
+         调度器      应用服务器
+		     应用服务器      数据库
+	 	     应用服务器 
+分布式存储 (取余算法) CRUSH算法--ceph
+
+OSD 提供真正的存储磁盘
+mon【monitor】知道有多少个node，进行取余  增加1%的数据，可能要移动90%的数据
+用户访问 a.txt|md5sum=16进制数%$n --->内容不变，md5sun值不变-->取余不变
+
+    node1   node2  node3  node4  OSD
+
+1.数据被分开存储
+2.数据的读写是并行的
+3.数据会像raid一样，单个文件会被打散---->用ceph的时候，要将raid关闭，不然会影响性能
+4.Ceph所有数据是3副本
+
+帮助文档：http://docs.ceph.org/start/intro
+
+Ceph提供：  ceph-osd  ceph-mon + ceph-mds (文件系统)/ ceph-radosgw（对象存储）
+       块存储、文件系统存储、对象存储（百度云盘）
+
+常用分布式文件系统：
+	Lustre
+	Hadoop
+	FastDFS
+	Ceph:最优秀的分布式存储
+	GlusterFS
+Ceph组件：
+	OSDs       ----存储设备：数量越多，存储空间越大
+	Montitors  ----集群监控组件：最少3个
+	RGW        ----对象存储网关
+	MDSs       ----存放文件系统的元数据
+	Client     ----ceph客户端
+###############################################################################
+
+1 案例1：实验环境
+准备四台KVM虚拟机，其三台作为存储集群节点，一台安装为客户端，实现如下功能：
+	创建1台客户端虚拟机
+	创建3台存储集群虚拟机
+	配置主机名、IP地址、YUM源
+	修改所有主机的主机名
+	配置无密码SSH连接
+	配置NTP时间同步
+	创建虚拟机磁盘
+使用4台虚拟机，1台客户端、3台存储集群服务器，拓扑结构如图-1所示。
+	client   eth0:192.168.4.10/24
+	node1    eth0:192.168.4.11/24
+	node2    eth0:192.168.4.12/24
+	node3    eth0:192.168.4.13/24
+
+步骤一：安装前准备
+1）物理机为所有节点配置yum源服务器。------真机上操作
+[root@room9pc01 ~]# yum -y install vsftpd
+[root@room9pc01 ~]# mkdir  /var/ftp/ceph
+[root@room9pc01 ~]# mount -o loop \
+rhcs2.0-rhosp9-20161113-x86_64.iso  /var/ftp/ceph
+[root@room9pc01 ~]# systemctl  restart  vsftpd
+
+
+2）修改所有节点都需要配置YUM源（这里仅以node1为例）。---原来的yum源也要有，共5088个包
+[root@node1 ~]# cat /etc/yum.repos.d/ceph.repo
+[mon]
+name=mon
+baseurl=ftp://192.168.4.254/ceph/rhceph-2.0-rhel-7-x86_64/MON
+gpgcheck=0
+[osd]
+name=osd
+baseurl=ftp://192.168.4.254/ceph/rhceph-2.0-rhel-7-x86_64/OSD
+gpgcheck=0
+[tools]
+name=tools
+baseurl=ftp://192.168.4.254/ceph/rhceph-2.0-rhel-7-x86_64/Tools
+gpgcheck=0
+
+3）修改/etc/hosts并同步到所有主机。
+警告：/etc/hosts解析的域名必须与本机主机名一致！！！！
+ [root@node1 ~]# cat /etc/hosts
+... ...
+192.168.4.10  client
+192.168.4.11     node1
+192.168.4.12     node2
+192.168.4.13     node3
+警告：/etc/hosts解析的域名必须与本机主机名一致！！！！
+[root@node1 ~]# for i in 10 11  12  13    #将/etc/hosts同时拷贝给其他主机
+> do
+> scp  /etc/hosts  192.168.4.$i:/etc/     
+> done
+
+[root@node1 ~]# for i in  10 11  12  13   #将yum源同时拷贝给其他主机
+> do
+> scp  /etc/yum.repos.d/ceph.repo  192.168.4.$i:/etc/yum.repos.d/
+> done
+
+3）配置无密码连接(包括自己远程自己也不需要密码)。
+[root@node1 ~]# ssh-keygen   -f /root/.ssh/id_rsa    -N ''  #密码为空
+[root@node1 ~]# for i in 10  11  12  13
+> do
+> ssh-copy-id  192.168.4.$i     #批量部署，前提是需要有密钥传给其他的主机
+> done
+
+
+步骤二：配置NTP时间同步
+1）真实物理机创建NTP服务器。
+[root@room9pc01 ~]#  yum -y install chrony
+[root@client ~]#  cat /etc/chrony.conf
+server 0.centos.pool.ntp.org iburst
+allow 192.168.4.0/24
+local stratum 10
+[root@room9pc01 ~]# systemctl  restart  chronyd
+
+
+如果有防火墙规则，需要清空所有规则
+[root@room9pc01 ~]# iptables -F
+
+2）其他所有节点与NTP服务器同步时间（以node1为例）。
+[root@node1 ~]#  cat /etc/chrony.conf
+server 192.168.4.254   iburst
+[root@node1 ~]# systemctl  restart  chronyd
+
+[root@node1 ~]# for i in 10 12 13
+> do
+> scp /etc/chrony.conf $i:/etc/
+> done
+
+[root@node1 ~]# for i in 10 12 13
+> do
+> ssh 192.168.4.$i "systemctl restart chronyd"
+> done
+
+步骤三：准备存储磁盘
+1）物理机上为每个虚拟机准备3块磁盘。（可以使用命令，也可以使用图形直接添加）
+ [root@room9pc01 ~]# virt-manager
+
+############################################################################
+2 案例2：部署ceph集群  --------------------------只能在node1上部署（能无密码登陆）
+沿用练习一，部署Ceph集群服务器，实现以下目标：
+	安装部署工具ceph-deploy
+	创建ceph集群
+	准备日志磁盘分区         3台虚拟机做OSD  3台虚拟机做monitor （共6台--最少配置）
+	创建OSD存储空间
+	查看ceph状态，验证
+
+
+步骤一：部署软件
+1）在node1安装部署工具，学习工具的语法格式。
+[root@node1 ~]#  yum -y install ceph-deploy   #ceph-deploy是用来部署ceph的一个脚本
+[root@node1 ~]#  ceph-deploy  --help
+
+2）创建目录
+[root@node1 ~]#  mkdir ceph-cluster   #随便创建一个目录，作为ceph的工作目录
+[root@node1 ~]#  cd ceph-cluster/     #只能在该工作目录中工作，否则会报错
+                                         #只要执行ceph-deploy命令，必须cd到工作目录内
+步骤二：部署Ceph集群
+1）创建Ceph集群配置。---告诉脚本，我有三台机子作monitor，给我生成配置文件
+[root@node1 ceph-cluster]# ceph-deploy new node1 node2 node3
+
+2）给所有节点安装软件包。------------确保yum源可用、无密码连接
+[root@node1 ceph-cluster]# ceph-deploy install node1 node2 node3
+                            #自动远程机子，将有关ceph的所有包都装上取，默认没有起任何服务
+3）初始化所有节点的mon服务（主机名解析必须对）
+[root@node1 ceph-cluster]# ceph-deploy mon create-initial
+                      #远程node1-3，开启mon服务  ceph-mon@nodexx.service 服务
+
+[root@node1 ceph-cluster]# ceph -s    #查看集群状态
+
+*****************************************************************************************
+常见错误及解决方法（非必要操作，有错误可以参考）：
+如果提示如下错误信息：
+[node1][ERROR ] admin_socket: exception getting command descriptions: [Error 2] No such file or directory
+
+解决方案如下（在node1操作）：
+先检查自己的命令是否是在ceph-cluster目录下执行的！！！！如果时确认是在该目录下执行的create-initial命令，依然保存，可以使用如下方式修复。
+[root@node1 ceph-cluster]# vim ceph.conf      #文件最后追加以下内容
+public_network = 192.168.4.0/24
+
+修改后重新推送配置文件:
+[root@node1 ceph-cluster]# ceph-deploy --overwrite-conf config push node1 node2 node3
+*****************************************************************************************
+步骤三：创建OSD
+
+node1    node2   node3
+vdb      vdb     	vdb ----缓存盘，生产环境中必须是固态盘，速度快、容量小
+
+vdc	   vdc 	vdc   ---缓存不是必须的，当磁盘全部是固态的时候，就不需要缓存磁盘
+vdd	   vdd	vdd
+40G	   40G       40G    120G
+
+vdb1-->vdc的缓存         vdb2--->vdd的缓存
+
+1）准备磁盘分区（node1、node2、node3都做相同操作）
+[root@node1 ceph-cluster]#  parted  /dev/vdb  mklabel  gpt
+[root@node1 ceph-cluster]#  parted  /dev/vdb  mkpart primary  1M  50%
+[root@node1 ceph-cluster]#  parted  /dev/vdb  mkpart primary  50%  100%
+[root@node1 ceph-cluster]# chown  ceph.ceph  /dev/vdb1   #修改所有者和所属组为ceph
+[root@node1 ceph-cluster]# chown  ceph.ceph  /dev/vdb2   #修改所有者和所属组为ceph
+   #这两个分区用来做存储服务器的日志journal盘
+[root@node1 ceph-cluster]# vim /etc/udev/rules.d/70-vdb.rules
+ENV{DEVNAME}=="/dev/vdb1",OWNER="ceph",GROUP="ceph"
+ENV{DEVNAME}=="/dev/vdb2",OWNER="ceph",GROUP="ceph"
+
+2）初始化清空磁盘数据（仅node1操作即可）---可以远程其他机子进行格式化操作
+[root@node1 ceph-cluster]# ceph-deploy disk  zap  node1:vdc   node1:vdd    
+[root@node1 ceph-cluster]# ceph-deploy disk  zap  node2:vdc   node2:vdd
+[root@node1 ceph-cluster]# ceph-deploy disk  zap  node3:vdc   node3:vdd   
+
+3）创建OSD存储空间（仅node1操作即可）
+[root@node1 ceph-cluster]# ceph-deploy osd create \
+ node1:vdc:/dev/vdb1 node1:vdd:/dev/vdb2  
+      #创建osd存储设备，vdc为集群提供存储空间，vdb1提供JOURNAL缓存，
+      #一个存储设备对应一个缓存设备，缓存需要SSD，不需要很大
+[root@node1 ceph-cluster]# ceph-deploy osd create \
+ node2:vdc:/dev/vdb1 node2:vdd:/dev/vdb2
+[root@node1 ceph-cluster]# ceph-deploy osd create \
+ node3:vdc:/dev/vdb1 node3:vdd:/dev/vdb2 
+
+4）常见错误（非必须操作）
+使用osd create创建OSD存储空间时，如提示run 'gatherkeys'，可以使用如下命令修复：
+[root@node1 ceph-cluster]#  ceph-deploy gatherkeys node1 node2 node3
+
+步骤四：验证测试
+1) 查看集群状态
+[root@node1 ~]#  ceph  -s
+
+2）常见错误（非必须操作）
+如果查看状态包含如下信息：
+health: HEALTH_WARN
+        clock skew detected on  node2, node3… 
+clock skew表示时间不同步，解决办法：请先将所有主机的时间都使用NTP时间同步！！！
+Ceph要求所有主机时差不能超过0.05s，否则就会提示WARN，如果使用NTP还不能精确同步时间，可以手动修改所有主机的ceph.conf，在[MON]下面添加如下一行：
+mon clock drift allowed = 1
+
+如果状态还是失败，可以尝试执行如下命令，重启ceph服务：
+[root@node1 ~]#  systemctl restart ceph\*.service ceph\*.target
+
+**到此，ceph-osd集群部署完毕
+###############################################################################
+3 案例3：创建Ceph块存储
+沿用练习一，使用Ceph集群的块存储功能，实现以下目标：
+	创建块存储镜像      ceph存储所必须的两个项目：
+	客户端映射镜像          ceph-mon  最少三台
+	创建镜像快照            ceph-osd  最少三台（三副本）
+	使用快照还原数据
+	使用快照克隆镜像
+	删除快照与镜像
+
+步骤一：创建镜像        块存储：访问的对方电脑上多了一块硬盘
+1）查看存储池。
+[root@node1 ~]# ceph osd lspools 
+0 rbd,    #共享池、存储池----------要在共享池中做共享镜像（可做多个镜像）image1、image2...
+
+2）创建镜像、查看镜像                                   #支持分层快照
+[root@node1 ~]# rbd create demo-image --image-feature  layering --size 10G
+[root@node1 ~]# rbd create rbd/image --image-feature  layering --size 10G
+[root@node1 ~]# rbd list             #只能查看共享池中镜像的名字
+[root@node1 ~]# rbd info demo-image  #可以查看镜像的大小、详细信息
+
+步骤二：动态调整
+1）缩小容量
+[root@node1 ~]# rbd resize --size 7G image --allow-shrink   #减小的时候可能已经
+[root@node1 ~]# rbd info image  存放了数据了，强行缩小需要额外添加参数--allow-shrink
+
+2）扩容容量
+[root@node1 ~]# rbd resize --size 15G image   #扩容不需要额外添加选项
+[root@node1 ~]# rbd info image
+
+
+步骤三：通过KRBD访问
+1）集群内将镜像映射为本地磁盘（可以不做本小实验）
+[root@node1 ~]# rbd map demo-image
+/dev/rbd0
+[root@node1 ~]# lsblk
+… …
+rbd0          251:0    0   10G  0 disk
+[root@node1 ~]# mkfs.xfs /dev/rbd0
+[root@node1 ~]# mount  /dev/rbd0  /mnt
+
+2）客户端通过KRBD访问
+	#客户端需要安装ceph-common软件包
+	#拷贝配置文件（否则不知道集群在哪）
+	#拷贝连接密钥（否则无连接权限）
+[root@client ~]# yum -y  install ceph-common
+[root@client ~]# scp 192.168.4.11:/etc/ceph/ceph.conf  /etc/ceph/
+[root@client ~]# scp 192.168.4.11:/etc/ceph/ceph.client.admin.keyring \
+/etc/ceph/      
+  #建议在node1机子上操作：不需要密码、
+[root@node1 ~]#  cd /etc/ceph/
+[root@node1 ceph]#  ls
+[root@node1 ceph]# scp ceph.conf client10:/etc/ceph/
+[root@node1 ceph]# cat ceph.client.admin.keyring 
+[root@node1 ceph]# scp ceph.client.admin.keyring client10:/etc/ceph
+ 
+[root@client ~]# rbd list
+[root@client ~]# rbd map image #挂载镜像 
+                                        #会自动生成/dev/rbd*的磁盘设备，该设备对应image镜像
+[root@client ~]# rbd unmap /dev/rbd*  #卸载镜像
+ 
+[root@client ~]#  lsblk
+[root@client ~]# rbd showmapped   #可以查看什么镜像挂载在什么磁盘上
+id pool image snap device    
+0  rbd  image -    /dev/rbd0
+
+3) 客户端格式化、挂载分区
+[root@client ~]# mkfs.xfs /dev/rbd0           #将分区格式化
+[root@client ~]# mount /dev/rbd0 /mnt/        #挂载
+[root@client ~]# echo "test" > /mnt/test.txt  
+
+
+步骤四：创建镜像快照
+***************************************************************************************
+快照 COW （Copy on Write）写时复制  ，速度快，省空间，能还原数据（快照的那一刻的数据）
+原始盘100G                  将 原始盘的数据快速镜像，创建链接
+a.txt：111
+b.txt：222 写完100个G
+
+快照备份10M   ： 在源文件修改之前，会把源文件数据拷贝下来，变为实时数据
+                    不变的数据只是一个快捷方式，访问的还是原来的数据
+a.txt(创建一个快捷方式)
+b.txt  ----永远停留在快照的那一刻的备份（数据能还原到快照的那一刻的数据）
+                               拷贝到
+100G数据库 tar cp 10:00  ----> 10:30  
+ 10：00（快照的是这时候的数据）
+
+10T数据库 锁住 --->快速快照 --->拷贝  --->解锁数据库
+
+不能一边用，一边进行快照（不支持在线快照）  先umount，再还原
+***************************************************************************************
+1) 查看镜像快照
+[root@node1 ~]# rbd snap ls image
+
+2) 创建镜像快照：
+[root@node1 ~]# rbd snap create image --snap image-snap1
+[root@node1 ~]# rbd snap ls image
+SNAPID NAME            SIZE 
+     4 image-snap1 15360 MB
+
+3) 删除客户端写入的测试文件
+[root@client ~]# rm  -rf   /mnt/test.txt
+
+4) 还原快照：还原快照的时候，客户端要先umount /mnt，再进行还原
+[root@node1 ~]# rbd snap rollback image --snap image-snap1
+#客户端重新挂载分区
+[root@client ~]# umount  /mnt
+[root@client ~]# mount /dev/rbd0 /mnt/
+[root@client ~]# ls  /mnt
+
+
+步骤四：创建快照克隆
+1）克隆快照                     #保护快照，防止被别人删除快照
+[root@node1 ~]#  rbd snap protect image --snap image-snap1
+[root@node1 ~]#  rbd snap rm image --snap image-snap1      #会失败
+[root@node1 ~]# rbd clone \
+image --snap image-snap1 image-clone --image-feature layering
+   #使用image的快照image-snap1克隆一个新的image-clone镜像
+
+[root@node1 ~]#  rbd snap unprotect image --snap image-snap1  #取消快照保护
+[root@node1 ~]#  rbd snap rm image --snap image-snap1      #能删除成功
+2）查看克隆镜像与父镜像快照的关系
+[root@node1 ~]#  rbd info image-clone
+rbd image 'image-clone':
+    size 15360 MB in 3840 objects
+    order 22 (4096 kB objects)
+    block_name_prefix: rbd_data.d3f53d1b58ba
+    format: 2
+    features: layering
+    flags: 
+    parent: rbd/image@image-snap1
+#克隆镜像很多数据都来自于快照链
+#如果希望克隆镜像可以独立工作，就需要将父快照中的数据，全部拷贝一份，但比较耗时！！
+
+[root@node1 ~]#  rbd flatten image-clone
+[root@node1 ~]#  rbd info image-clone
+rbd image 'image-clone':
+    size 15360 MB in 3840 objects
+    order 22 (4096 kB objects)
+    block_name_prefix: rbd_data.d3f53d1b58ba
+    format: 2
+    features: layering
+    flags: 
+#注意，父快照信息没了！
+
+
+步骤四：其他操作
+1） 客户端撤销磁盘映射
+[root@client ~]# umount /mnt
+[root@client ~]# rbd showmapped
+id pool image        snap device    
+0  rbd  image        -    /dev/rbd0
+//语法格式:
+[root@client ~]# rbd unmap /dev/rbd0
+2）删除快照与镜像
+[root@node1 ~]# rbd snap rm image --snap image-snap
+[root@node1 ~]# rbd  list
+[root@node1 ~]# rbd  rm  image
+
+
+
+
+
+
+
+
+
+
+
+
+

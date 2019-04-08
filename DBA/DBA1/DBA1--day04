@@ -1,0 +1,249 @@
+2019-03-14
+
+#######################################################################################
+
+一、多表查询   ------------------多个表中要有一个唯一标识的字段
+	
+	1.1 复制表  -----原表字段的键值属性不会复制给新表
+		1.1.0 命令格式
+		    create table 库名.表名  SQL查询;
+
+		1.1.1 作用1 备份表
+		     mysql> create database db4;
+		     mysql> use db4;
+		     mysql> create table user2 select * from userdb.user;
+
+		1.1.2 作用2 快速建表	
+			mysql> use db4;
+			mysql> create table user2 select * from userdb.user where 11<=10;
+			mysql> show tables;
+			mysql> select * from user2;
+			mysql> desc user2;
+
+	1.2 多表查询介绍
+		将2个或2个以上的表 按某个条件连接起来，从中选取需要的数据
+		当多个表中 存在相同意义的字段（字段名可以不同）时，可以通过该字段连接多个表
+	1.2 格式1
+		  select 字段名列表 from 表a，表b；  #笛卡尔集：表记录
+		  select 字段名列表 from 表a，表b  where 条件；
+	mysql> update userdb.user set age=46 where id>10 and id <=25;
+	mysql> select username,age from userdb.user where age > (select avg(age) from userdb.user);
+	mysql> select username,age from userdb.user where age < (select avg(age) from userdb.user);
+	
+	1.3 格式2  where 子查询：把内层查询结果作为外层查询的查询条件
+             select 字段名列表 from 表名 where 条件 （select 字段名列表 from 表名 where 条件）;
+	mysql> select  username from db4.t1 where uid<=2;  #同表查询
+	mysql> select username from userdb.user where username in(select username from
+                                                       db4.t1 where uid <=2);
+	mysql> select username from userdb.user where username in(select username from    
+                                       db4.t1 where uid>=2);   #不同库下的不同表查询
+
+	1.4 格式3 
+		左连接查询: 查询结果成立时,以左边的表为主显示查询结果
+
+	       select 字段名列表  from 表1 left join 表2 on 条件表达式;
+	mysql> create table t3 select username,uid,password,homedir from userdb.user 
+		limit 3;
+	mysql> create table t4 select username,uid,password,homedir from userdb.user 
+		limit 46;
+	mysql> select * from t3;
+	mysql> select * from t4;
+
+	mysql> select * from t3 left join t4 on t3.uid = t4.uid;
+
+		右连接查询: 查询结果成立时,以右边的表为主显示查询结果
+	       select 字段名列表  from 表1 right join 表2 on 条件表达式;
+	mysql> select * from t3 right join t4 on t3.uid = t4.uid;
+
+
+#####################################################################################
+二 MySQL管理工具
+ 	2.1 访问数据库服务器的方式有哪些?
+	   1. 命令连接:
+	   2. 安装软件,访问软件,连接数据库服务器
+		软件提供图形界面(开发的图形 或 web页面)
+
+ 	phpmyadmin
+基本思路:
+	1.安装httpd mysql  php-mysql及相关包
+	2.启动httpd服务程序
+	3.解压phpmyadmin包,部署到网站目录
+	4.配置config.inc.php,指定MySQL主及地址
+	5.创建授权用户
+	6.浏览器访问 登陆使用
+
+	2.2 在数据库服务器上,部署phpMyAdmin 图形软件     ----LAMP + phpMyAdmin平台
+		[ ]# yum -y install httpd php php-mysql  #安装相应的软件包
+		[ ]# systemctl start httpd		    #启动httpd服务
+	
+		[ ]# tar -zxvf phpMyAdmin-2.11.11-all-languages.tar.gz	 #解包
+		[ ]# mv  phpMyAdmin-2.11.11-all-languages  /var/www/html/phpmyadmin
+		[ ]# chown -R apache.apache /var/www/html/phpmyadmin  #设置目录权限
+
+		[ ]# cd /var/www/html/phpmyadmin
+		[ ]# cp config.sample.inc.php config.inc.php    #拷贝模版文件为配置文件
+		[ ]# vim +31 config.inc.php	 	#修改配置文件,光标直接定位到31行
+			.....
+			17 $cfg['blowfish_secret'] = 'plj123';  #填任何内容都可以
+			31 $cfg['Servers'][$i]['host'] = 'localhost';  #不用改
+		真机浏览器访问:
+		firefox http://192.168.4.50/phpmyadmin #用root用户登陆,数据库密码
+
+是root管理员登陆,还是普通用户登陆? 怎么用户授权 
+
+mysql -h(数据库服务器ip地址)192.168.4.50  -uroot -p
+#######################################################################################
+三 用户授权与权限撤销
+	3.0 恢复数据库管理员root用户本机登陆--(忘记了密码)
+		1.停止MySQL服务程序
+		2.跳过授权表启动MySQL服务程序
+		3.进入数据库重设root密码(更新user表记录)
+		4.以正常方式重起MySQL服务程序
+	[ ]# systemctl stop mysqld
+	[ ]# vim /etc/my.cnf
+		.......
+		[mysql]
+		skip-grant-tables
+		#validate_password_policy=0
+		#validate_password_length=6
+		.....
+	[ ]# systemctl start mysqld
+	[ ]# mysql
+	mysql> update mysql.user set authentication_string=password("密码")
+		-> where
+		-> user="root" and host="localhost";
+	mysql> flush privileges;
+	mysql> quit
+	[ ]# vim /etc/my.cnf
+		.......
+		[mysql]
+		#skip-grant-tables
+		validate_password_policy=0
+		validate_password_length=6
+		.....
+	[ ]# systemctl restart mysqld
+
+
+		2.修改数据库管理员root用户本机登陆密码:
+
+	[ ]# mysqladmin -hlocalhost -uroot -p password "新密码"
+		Enter password:输入当前密码(旧密码)
+	或者
+	[ ]# mysqladmin -uroot -p旧密码 password
+	    New password: 输入新密码 
+	    Confirm new password: 再次输入新密码
+
+
+ 	3.1 用户授权: 
+		在数据库服务器上,添加连接用户及设置访问权限
+	3.2 默认那个用户有授权 权限:
+		 数据库管理员root用户本机登陆才有授权权限
+	3.3 授权记录在那里: 授权库mysql:
+			    user:记录已有的用户及访问权限
+			     db :记录已有的用户对数据库的访问权限
+			    tables_priv :记录已有的用户对表的访问权限
+			    columns_priv:记录已有的用户对字段的访问权限
+	3.4 授权命令的用法:
+		mysql> grant 权限列表 on  库名.表名  to  用户名@"客户端地址" identified by "密码"
+			[ with grant option ]; #添加后可以使用户具有授权权限
+	注意事项:
+		当库名.表名 为*.*时,匹配所有库的所有表
+		授权设置存放在mysql库的user表
+	权限列表:
+		all:匹配所有权限
+		select,update,insert...
+		select,update(字段1,...字段N)
+	客户端地址:
+		% ：匹配所有主机
+		192.168.4.% ：匹配指定的一个网段
+		192.168.1.1 ：匹配指定IP地址的单个主机
+		%.tarena.com :匹配一个DNS区域
+		svr1.tarena.com :匹配指定域名的单个主机		
+
+	3.5例子
+	mysql> grant all on *.* to mydba@"%" identified by "111111" with grant option;
+	mysql> grant select on userdb.user to gg@"localhost" identified by "123456";
+
+	3.6 相关命令
+		mysql> select user();  #查看当前登陆的用户
+		mysql> show grants;    #显示当前用户的权限
++---------------------------------------------------------------------+----------------------------------------------------+
+| Grants for root@localhost                                           |
++---------------------------------------------------------------------+------------------------------------------------------+
+| GRANT ALL PRIVILEGES ON *.* TO 'root'@'localhost' WITH GRANT OPTION |
+| GRANT PROXY ON ''@'' TO 'root'@'localhost' WITH GRANT OPTION        |
++---------------------------------------------------------------------+-----------------------------------------------------+
+
+		mysql> select user,host,from mysql.user;   #查看有那些授权用户
+		mysql> show grants for 用户名@"客户端地址";  #查看用户有那些权限
+		mysql> select * from mysql.db where host="webs";
+
+		重设用户密码：
+		1）授权用户连接后修改密码
+			mysql> set password= password("新密码")；
+		2）管理员重制授权用户连接密码：
+			mysql> set password for 用户名@"客户端地址"=password("新密码");
+	3.7 撤销用户权限
+		mysql> revoke 权限列表 on  库名.表名  from  用户名@"客户端地址";
+		mysql> revoke  grant option on *.* from mydba@"%";
+		mysql> revoke delete,select on *.* from mydba@"%";
+		mysql> revoke all on *.* from mydba@"%";
+
+	3.8 删除授权用户
+		mysql> drop user 用户名@"客户端地址";
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

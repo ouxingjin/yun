@@ -1,0 +1,289 @@
+2019年01月10日
+
+系统安全保护
+
+SELinux
+---Scurity Enhanced Linux
+--美国NSA国家安全局主导开发，一套增强Linux系统安全的强制访问控制系统
+--集成到Linux内核（2.6及以上）中运行
+--RHEL7基于SELinux体系针对用户、进程、目录和文件提供了预设
+
+
+SELinux的运行模式            root唯一一个可以决定SELinux的命运
+--enforcing（强制）、permissive（宽松）
+--disabled（彻底禁用）---root为皇帝状态 SELinux皇帝驾崩了
+
+注意：任何状态变成disabled状体，都需要修改配置文件，重启操作系统
+
+
+切换运行模式：
+--临时切换：setenforce 1|0
+--固定配置：/etc/selinux/config  文件（SELinux永久状态配置文件）
+
+
+
+[root@goodgame ~]# getenforce    #查看当前SELinux状态
+Enforcing
+[root@goodgame ~]# setenforce 0   #修改SELinux当前状态
+[root@goodgame ~]# getenforce
+Permissive
+[root@goodgame ~]# vim /etc/selinux/config #永久修改SELinux状态
+SELINUX=permissive
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+####################################################################
+
+防火墙策略管理（侍卫）
+
+首先搭建两个服务
+— 构建web服务（为客户端提供一个页面）
+ 虚拟机server搭建web服务器
+  1.安装软件包  httpd   Nginx（国内应用最多）  tomcat
+
+   [root@goodgame ~]# yum -y install httpd
+
+   #当没有找到任何页面时，会显示测试页面（或404 Not Found）
+
+   2.重启httpd服务 
+     [root@goodgame ~]# systemctl restart httpd  #重启服务
+     [root@goodgame ~]# systemctl enable httpd   #设置开机自启
+   3.访问本机测试
+      [root@goodgame ~]# firefox 172.25.0.1
+   4.写一个自己的页面文件
+      默认存放网页文件路径：/var/www/html/index.html
+      默认网页文件名字：index.html
+     [root@goodgame ~]# vim /var/www/html/index.html 
+       <marquee><font color=blue><h1>I LOVE LINUX
+            滚动        字体颜色          最大字体
+     [root@goodgame ~]# firefox 127.0.0.1
+
+二 构建FTP服务（文件传输）
+    虚拟机server：
+    1.安装vsftpb软件包
+        [root@goodgame ~]# yum  -y install vsftpd
+    2.重启vsftpd服务
+      [root@goodgame ~]# systemctl restart vsftpd
+      [root@goodgame ~]# systemctl enable vsftpd
+    3.测试访问本机的FTP服务
+         默认数据共享位置：/var/ftp
+      [root@goodgame ~]# firefox ftp://172.25.0.11
+
+   火狐浏览器：最会缓存的浏览器，要右击重新载入页面
+
+#######################################################################
+防火墙策略管理
+
+   作用：隔离  过滤
+
+硬件防火墙：斯科 华为  买一个硬件保护一群机器
+软件防火墙：360  金山独霸  卡巴斯基-----------只能保护本机
+
+RHEL7的防火墙体系
+系统服务：firewalld
+管理工具：firewall-cmd   firewalld-config（图形工具）
+
+
+根据所在的网络场所区分，预设保护规则集
+ ---public：仅允许访问本机的sshd、dhcp ping服务 拒绝所有
+ ---trusted：允许任何访问
+ ---block：阻塞任何来访请求（明确拒绝所有访问）
+ ---drop：丢弃任何来访的数据包（直接丢弃，不给任何回应，节省资源）
+
+数据包：源IP地址   目标IP地址  数据  目标端口
+
+ 防火墙的判定规则
+   1.查看求情数据包，其中的源IP地址，然后查看自己所有区域规则，那一个
+     区域有该源IP地址的规则，则进入该区域       
+   2.进入默认区域 （在默认情况下，默认区域为public）
+
+ 
+#############################################################
+防火墙默认区域的修改  
+  1.查看防火墙默认区域
+虚拟机server
+[root@goodgame ~]# firewall-cmd --get-default-zone  #查看默认区域
+虚拟机desktop
+[root@desktop0 ~]# ping -c 2 172.25.0.11  #可以通信
+
+虚拟机server
+[root@goodgame ~]# firewall-cmd --set-default-zone=block  #修改默认区域
+[root@goodgame ~]# firewall-cmd --get-default-zone 
+虚拟机desktop
+[root@desktop0 ~]# ping -c 2 172.25.0.11  #不可以通信，有回应
+
+虚拟机server
+[root@goodgame ~]# firewall-cmd --set-default-zone=drop #修改默认区域
+[root@goodgame ~]# firewall-cmd --get-default-zone 
+虚拟机desktop
+[root@desktop0 ~]# ping -c 2 172.25.0.11  #不可以通信，没有回应
+
+#######################################################3
+--public：仅允许访问本机sshd  dhcp  ping服务
+互联网常见的协议：
+	http：超文本传输协议                默认端口 80
+	https：安全的超文本传输协议        默认端口 443
+	ftp ：文本传输协议                  默认端口 21
+	DNS：域名解析协议                   默认端口 53
+	telnet：远程管理协议               默认端口 23
+	tftp：简单的文件传输协议           默认端口 69
+	smtp：邮件协议（用户发邮件协议）  默认端口 25
+	pop3：邮件协议（用户收邮件协议）  默认端口 110
+	snmp：简单的网络管理协议          默认端口 161
+
+修改public区域，添加相应的协议
+
+虚拟机server
+[root@goodgame ~]# firewall-cmd --set-default-zone=public #修改默认区域
+[root@goodgame ~]# firewall-cmd --get-default-zone        #
+[root@goodgame ~]# firewall-cmd --zone=public --list-all
+虚拟机desktop
+[root@desktop0 ~]# firefox 172.25.0.11       #访问失败
+[root@desktop0 ~]# firefox ftp://172.25.0.11  #访问失败
+
+虚拟机server
+[root@goodgame ~]# firewall-cmd --zone=public --add-service=http
+[root@goodgame ~]# firewall-cmd --zone=public --add-service=ftp
+[root@goodgame ~]# firewall-cmd --zone=public --list-all
+虚拟机desktop
+[root@desktop0 ~]# firefox 172.25.0.11
+[root@desktop0 ~]# firefox ftp://172.25.0.11
+
+###################################################################
+永久设置防火墙策略
+配置规则的位置
+---永久（--permanent） #重新加载防火墙策略才能生效
+虚拟机server
+[root@goodgame ~]# firewall-cmd --reload  #重新加载防火墙所有配置
+[root@goodgame ~]# firewall-cmd --zone=public --list-all
+
+[root@goodgame ~]# firewall-cmd --permanent --zone=public --add-service=http
+[root@goodgame ~]# firewall-cmd --zone=public --list-all 
+[root@goodgame ~]# firewall-cmd --reload
+[root@goodgame ~]# firewall-cmd --zone=public --list-all
+
+[root@goodgame ~]# firewall-cmd --permanent --zone=public --add-service=ftp
+[root@goodgame ~]# firewall-cmd --zone=public --list-all
+[root@goodgame ~]# firewall-cmd --reload
+[root@goodgame ~]# firewall-cmd --zone=public --list-all
+
+################################################################
+区域添加源IP地址策略
+虚拟机server
+]# firewall-cmd --zone=block --add-source=172.25.0.11
+
+
+
+
+
+
+
+#####################################################################
+
+端口：服务或者协议的编号    端口标识程序或协议  端口不唯一 
+
+实现本机的端口映射                        #所有浏览器的默认端口：80
+本地应用的端口重定向（端口1 -->端口2）
+---从客户机访问 端口1 的请求，自动映射到本机 端口2
+--比如，访问以下两个地址可以看到相同的页面：
+   http：//server0.example.com:5423/
+   http://server0.example.com/
+         访问                    转到
+客户端：172.25.0.11：5423-------->172.25.0.11:80
+
+虚拟机server
+[root@goodgame ~]# firewall-cmd --permanent --zone=public --add-forward-port=port=5423:proto=tcp:toport=80
+
+[root@goodgame ~]# firewall-cmd --reload 
+[root@goodgame ~]# firewall-cmd --zone=public --list-all
+虚拟机desktop
+[root@desktop0 ~]# firefox 172.25.0.11:5423
+
+
+################################################################3
+配置用户环境
+
+影响指定用户的bash 解释环境
+--- ~/.bashrc,每次开启 bash 终端时生效
+
+影响所有用户的bash 解释环境
+--- /etc/bashrc,每次开启 bash 终端时生效
+
+
+[root@goodgame ~]# vim /root/.bashrc
+[root@goodgame ~]# vim /home/student/.bashrc
+[root@goodgame ~]# vim /etc/bashrc 
+
+新开一个终端:
+  root可以执行那些别名  student可以执行那些别名
+
+####################################################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

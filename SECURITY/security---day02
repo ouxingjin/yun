@@ -1,0 +1,272 @@
+2019-04-02
+
+##########################《安全与监控》#######################################
+
+一、数据加密与解密                   谁发送,谁加密
+  1.1 信息传递中的风险：
+	1）技术型：电脑黑客、开发人员、商业间谍
+	2）非技术型：出差人员、流程失控、离职人员、合作伙伴、高管习惯等
+
+  1.2 什么是加/解密
+	1）发送方：明文 --->密文
+		Tarena  =>加密 =>25 31 24 23 46 31
+	2）接收方：密文 --->明文
+		25 31 24 23 46 31  => 解密 => Tarena
+  1.3 加密目的及方式
+	1）确保数据的机密性
+		* 对称加密：加密/解密用同一个密钥
+		* 非对称加密：加密/解密用不同的密钥（公钥、私钥）
+	2）保护信息的完整性
+		信息摘要：基于输入的信息生成长度较短、位数固定的散列值
+
+  1.4 常见的加密算法
+	1）对称加密：DES、AES
+	2）非对称加密：RSA、DSA
+	3）Hash散列技术，用于信息摘要：MD5、SHA
+		* 根据输入的文本（长度不限），生成固定长度（比如128位）的摘要文本
+		* 只要输入的文本不同，则生成的摘要文本页不一样
+
+  1.5 MD5完整性检验
+	1）使用md5sum校验工具
+	   * 生成MD5校验值
+	   * 与软件官方提供的校验值比对 （md5值相同则数据完整）
+[root@lvs-57 ~]# md5sum mysql-5.7.17.tar   #从57 主机上获取myql包校验值
+02fb5eb04a41b232616e184332d65e01  mysql-5.7.17.tar
+[root@mysql-58 ~]# md5sum mysql-5.7.17.tar  #从58 主机上获取myql包校验值
+02fb5eb04a41b232616e184332d65e01  mysql-5.7.17.tar
+
+2 GPG加/解密工具
+   2.1 GnuPG简介
+ 	1）http://www.gnupg.org/
+  	2)最流行的数据加密、数字签名工具软件
+
+例子：真机
+	创建两个普通用户usera和userb，密码都是123456
+	usera加密:
+		]# head -3 /etc/passwd > a.txt
+		]# cat a.txt
+		]# gpg -c a.txt  #设置密码
+		]# mv a.txt.gpg /tmp/
+	userb解密:
+		]# gpg -d /tmp/a.txt.gpg >~/a.txt #输入解密密码
+		]# cat a.txt
+
+ 2.2 GPG非对称加/解密
+   基本过程:
+	1)用户B把自己的公钥传给用户A
+	2)用户A使用B的公钥加密数据,然后将加密后的数据传给用户B
+	3)用户B使用自己的私钥解密数据
+  前期准备工作:
+	1)userb 创建密钥对: --gen-key
+	 	]# rm -rf ~/.gnupg/  #删除原来的公钥私钥文件夹
+		]# gpg --gen-key  #生成密钥对
+		]# ls ~/.gnupg  #公钥pubring.gpg  私钥secring.gpg,其余为相关的配置文件
+		private-keys-v1.d  pubring.gpg~  secring.gpg  trustdb.gpg
+		pubring.gpg        random_seed   S.gpg-agent
+______________________________________________________
+	创建密钥对慢的解决办法:
+	[root@room11pc16 ~]# mv /dev/random /dev/random2
+	[root@room11pc16 ~]# ln -s /dev/urandom /dev/random	
+	[root@room11pc16 ~]$ rm -rf ~/.gnupg/
+	[root@room11pc16 ~]$ gpg --gen-key  #再次生成密钥对 
+________________________________________________________
+
+	2)userb 导出公钥: --export, --armor 或- a
+[userb@room11pc16 ~]$ gpg -a --export > userb.pub  #用户b导出公钥
+[userb@room11pc16 ~]$ mv userb.pub /tmp/   #将公钥移动到其他人有读写全的目录下
+
+	3)usera 导入公钥: --import
+[usera@room11pc16 ~]$ rm -rf ~/.gnupg/
+[usera@room11pc16 ~]$ gpg --import /tmp/userb.pub 
+[usera@room11pc16 ~]$ ls ~/.gnupg
+gpg.conf  pubring.gpg  pubring.gpg~  secring.gpg  trustdb.gpg
+
+	4)usera 加密文件
+[usera@room11pc16 ~]$ tail -5 /etc/passwd > gg.txt
+[usera@room11pc16 ~]$ cat gg.txt	
+[usera@room11pc16 ~]$ gpg -e -r userb gg.txt  #加密文件,-r 指定目标用户 -e加密操作
+[usera@room11pc16 ~]$ mv gg.txt.gpg /tmp/
+
+	5)userb 解密文件
+[userb@room11pc16 ~]$ ls /tmp/ |grep gg  #查看加密的文件
+[userb@room11pc16 ~]$ gpg -d /tmp/gg.txt.gpg  > ~/gg.txt  #解密文件,要输入私钥密码
+
+
+GPG软件签名与验证:
+	1)软件签名与验证过程
+		* 软件官方以私钥对软件包执行数字签名
+		* 用户下载软件包,软件官方的公钥
+		* 以官方公钥验证软件包签名,确保数据来源正确
+	2)为软件包建立签名文件
+		]# gpg --detach-sign 或 -b 文件名  
+	3)验证软件包签名
+		]# gpg --verify 软件包签名.sig
+例子:
+	userb用户: 
+		~]$ gpg -b a.txt  #建立签名文件
+		~]$ mv a.* /tmp
+		~]$ ls /tmp/a.*
+
+	usera用户:
+		~]$ cat /tmp/a.txt
+		~]$ gpg --verify /tmp/a.txt.sig #验证签名是否完好
+	[userb@room11pc16 ~]$ sed -i '1aAAAAAAAA' /tmp/a.txt
+		~]$ gpg --verify /tmp/a.txt.sig #usera用户验证,提示签名损坏
+	[userb@room11pc16 ~]$ sed -i '2d' /tmp/a.txt
+		~]$ gpg --verify /tmp/a.txt.sig  #删除后,再次验证,签名完好
+
+
+二、AIDE入侵检测系统
+2.1 初始化系统
+   1) 安装软件包aide
+	  * 该软件为一套入侵检测系统(没有防护功能)
+	  * 配置yum源即可安装aide软件
+  2) 修改配置文件
+     #主配置文件: /etc/aide.conf
+     #数据库目录: /var/lib/aide
+     #日志目录:   /var/log/aide
+
+实验中:注释99~312行内容,自定义一个检测目录
+	]# vim /etc/aide.conf
+	       .......
+	    /root  FIPSR (检查规则)
+
+初始化检查:
+    在没有被攻击入侵请,根据配置文件,对数据进行校验操作
+  ]# aide --init    #初始化检查
+    AIDE, version 0.15.1
+    AIDE database at /var/lib/aide/aide.db.new.gz initialized.
+	# aide.db.new.gz记录当前入侵之前的初始化信息
+	# /var/lib/aide/aide.db.new.gz 
+	#初始化信息文件一般放在外部设备而不是本机,一般拷贝到u盘,对比的时侯再拷贝回来
+实验将初始化信息文件移动到/opt下:
+  ~]# mv /var/lib/aide/aide.db.new.gz /opt/
+  ~]# cp /opt/aide.db.new.gz /var/lib/aide/aide.db.gz
+	#因为AIDE规定与aide.db.gz对比,因此要改名
+
+[root@lvs-57 ~]# aide --check  #根据数据库执行入侵检测
+
+
+
+三、扫描与抓包
+3.1 为什么要扫描?
+  1) 以获取一些公开/非公开信息为目的
+	* 检测潜在的风险
+	* 查找可攻击目标
+	* 收集设备/主机/系统/软件信息
+	* 发现可利用的安全漏洞
+  2) 扫描方式及工具
+   典型的扫描方式:
+	* Scan 主动探测
+	* Sniff  被动监听/嗅探
+	* Capture  数据包捕获(抓包)
+   常见的安全分析工具:
+	扫描器: NMAP
+	协议分析: tcpdump WireShark
+
+NMAP简介:
+   1)一款强大的网络探测利器工具
+   2)支持多种探测技术: 
+	ping扫描
+	多端口扫描
+	TCP/IP指纹校验
+
+常用的扫描类型:
+  * -sS , TCP SYN扫描(半开)
+  * -sT , TCP 连接扫描(全开)
+  * -sU , UDP扫描
+  * -sP , ICMP扫描
+  * -A , 目标系统全面分析
+
+]# yum -y install nmap  #安装nmap软件包
+]# which nmap
+]# man nmap  #查看帮助
+
+   3)基本用法:
+       ]# nmap [扫描类型] [选项] <扫描目标...>
+	~]# nmap -sP n 192.168.4.49-60  #扫描连续的主机是否在线,=ping
+	~]# nmap -sP n 192.168.4.50,53,57 #扫描不连续的主机是否在线
+	~]# nmap -sP n 192.168.4.49-55,58,60 #扫描既有连续,又有不连续的主机
+
+	~]# nmap -sT -p 20-8080 192.168.4.57  #扫描连续的端口
+	~]# nmap -sT -p 20,22,8070 192.168.4.57 #扫描不连续的端口
+
+	~]# nmap -A 目标系统全面分析
+
+
+3.2 网络抓包工具
+
+tcpdump抓包命令: 一款提取TCP数据包的命令行工具
+    1) 基本用法: 选项-->改变抓包方式
+	]# tcpdump [选项] [过滤条件]  #默认只抓eth0的
+
+[root@room11pc16 ~]# rpm -qa |grep tcpdump  #查看tcpdump的安装软件包
+tcpdump-4.9.0-5.el7.x86_64
+[root@lvs-57 ~]# man tcpdump  #查看tcpdump慢帮助
+
+
+监控选项如下：
+	# -i，指定监控的网络接口（默认监听第一个网卡）
+	# -A，转换为 ACSII 码，以方便阅读
+	# -w，将数据包信息保存到指定文件
+	# -r，从指定文件读取数据包信息
+tcpdump的过滤条件：
+	# 类型：host、net、port、portrange
+	# 方向：src、dst
+	# 协议：tcp、udp、ip、wlan、arp、……
+	# 多个条件组合：and、or、not
+抓包选项:
+	~]# tcpdump -i eth0 #指定网卡
+	~]# tcpdump -i eth0 -A   #-A 转换为ACSII码
+	~]# tcpdump -i eth0 -A -w /opt/b.txt  #-w 指定数据包保存位置
+	~]# tcpdump -i eth0 -A -c 5  -w /opt/ss.txt  #-c 指定抓包个数
+	~]# tcpdump -A -r /opt/b.txt   # -r 从指定文件读取数据包信息
+过滤条件:
+	~]# tcpdump -i eth0 icmp
+	~]# tcpdump -i eth0 icmp and host 目标主机IP  #抓那一台主机的
+	~]# tcpdump -i eth0 -A port  21 and host 目标主机IP
+
+WireShark协议分析器:
+  安装:真机
+[root@room11pc16 ~]# yum -y install wireshark*
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

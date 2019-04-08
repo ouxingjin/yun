@@ -1,0 +1,284 @@
+2019-03-05
+
+#######################################################################################
+把一组计算机组合在一起，给用户提供单一的服务
+
+目的：提高性能：
+      降低成本：
+      提高可扩展性：
+      增强可靠性：
+集群分类：
+   高性能计算集群HPC：   
+   负载均衡（LB）集群：
+   高可用（HA）集群：避免单点故障，当一个系统发生故障时，可以快速迁移
+
+LVS：性能高，功能少（在内核中）；不支持正则，4层
+nginx：性能中，功能多，支持正则
+LVS是调度器（与路由器工作原理一样）  nginx代理
+
+LVS集群组成：
+	前端：负载均衡层-------由一台或多台负载调度器构成
+	中间：服务器群组层----由一组实际运行应用服务的服务器组成
+	底端：数据共享存储层----提供共享存储空间的存储区域
+
+		   |应用服务器
+调度器（前端）--->|应用服务器 ------->  数据库(后端)
+		   |应用服务器
+
+LVS术语：
+	Director Server：调度服务器---将负载分发到Real Server的服务器
+	Real Server：真实服务器----真正提供应用服务的服务器
+	VIP：虚拟IP地址------公布给用户访问的虚拟IP地址
+	RIP：真实IP地址------集群节点上使用的IP地址（连接后端服务器的ip）
+	DIP：调度器连接节点服务器的IP地址
+	CIP：（客户端ip，client）
+
+LVS工作模式： 请求的数据包小、回应的数据包大
+
+VS/NAT模式：通过网络地址转换实现的虚拟服务器（大并发访问时，调度器的性能可能会成为瓶颈）
+              使用于数据量小的。（请求数据、回应数据都经过改服务器）
+VS/DR模式：直接使用路由技术实现虚拟服务器（节点服务器需要配置VIP，注意MAC地址广播）
+             适用于数据量大的。（请求包-->调度器   回应数据包--->路由器直接返回给用户）
+VS/TUN模式：通过隧道方式（VPN）实现虚拟服务器，一般不用
+
+LVS调度算法：
+     轮询：（常用）将客户端请求平均分发到Real Server
+     加权轮询：
+     最少连接：（最核心算法）选择连接数最少的服务器
+     加权最少连接：
+    源地址散列（Source Hashing）
+
+#############################################################################
+
+1 案例1：ipvsadm命令用法
+步骤一：使用命令增、删、改LVS集群规则
+1）创建LVS虚拟集群服务器（算法为加权轮询：wrr）
+   ipvsadm常用选项：
+	ipvsadm -A  添加虚拟服务器     集群和Real Server都可以创建多个
+	ipvsadm -E  修改虚拟服务器
+	ipvsadm -D  删除虚拟服务器
+	ipvsadm -C  清空所有
+	ipvsadb -a  添加真实服务器
+	ipvsadb -e  修改真实服务器
+	ipvsadb -d  删除真实服务器
+	ipvsadb -l  查看LVS规则表
+	-s[rr|wrr|lc|wlc] 指定集群算法
+rr（轮询）  wrr（加权轮询） lc（最少连接数）  wlc（加权最少连接数）
+
+[root@proxy ~]# yum -y install ipvsadm
+[root@proxy ~]# ipvsadm -A -t 192.168.4.5:80 -s wrr   #-A创建集群
+[root@proxy ~]# ipvsadm -Ln
+
+2）为集群添加若干real server
+[root@proxy ~]# ipvsadm -a -t 192.168.4.5:80 -r 192.168.2.100 -m -w 1
+[root@proxy ~]# ipvsadm -a -t 192.168.4.5:80 -r 192.168.2.200 -m -w 2
+[root@proxy ~]# ipvsadm –a -t 192.168.4.5:80 -r 192.168.2.201 -m -w 3
+[root@proxy ~]# ipvsadm –a -t 192.168.4.5:80 -r 192.168.2.202 -m -w 4
+[root@proxy ~]# ipvsadm -Ln
+
+3）修改集群服务器设置(修改调度器算法，将加权轮询修改为轮询)
+[root@proxy ~]# ipvsadm -E -t 192.168.4.5:80 -s wrr  #-E修改为加权轮询
+[root@proxy ~]# ipvsadm -Ln
+[root@proxy ~]# ipvsadm -D -t 192.168.4.5:80   #-D删除192.168.4.5：80集群
+                           -t/-u  #TCP/UDP
+4）修改read server（使用-g选项，将模式改为DR模式--直连路由）
+[root@proxy ~]# ipvsadm -e -t 192.168.4.5:3306 -r 1.1.1.1 -w 2 -i
+[root@proxy ~]# ipvsadm -e -t 192.168.4.5:3306 -r 2.2.2.2 -w 2 -m
+       -i(隧道模式)  -g（DR模式） -m（NAT模式---欺骗模式）
+
+6）永久保存所有规则
+[root@proxy ~]# ipvsadm-save -n > /etc/sysconfig/ipvsadm  #-n数字显示
+
+7）清空所有规则
+[root@proxy ~]# ipvsadm -C
+
+##########################################################################
+2 案例2：部署LVS-NAT集群
+使用LVS实现NAT模式的集群调度服务器，为用户提供Web服务：
+	集群对外公网IP地址为192.168.4.5
+	调度器内网IP地址为192.168.2.5
+	真实Web服务器地址分别为192.168.2.100、192.168.2.200
+	使用加权轮询调度算法，真实服务器权重分别为1和2
+
+web1  eth1 192.168.2.100  网关192.168.2.5  
+web2  eth1 192.168.2.200  网关192.168.2.5
+
+必须开启路由功能：echo "1" >/proc/sys/net/ipv4/ip_forward
+添加网关：
+[root@web1 ~]# nmcli connection modify eth1 ipv4.gateway 192.168.2.5
+查看网卡信息：
+[root@web1 ~]# cat /etc/sysconfig/network-scripts/ifcfg-eth1
+
+步骤一：配置基础环境
+1）设置Web服务器（以web1为例）
+[root@web1 ~]# yum -y install httpd
+[root@web1 ~]# echo "192.168.2.100" > /var/www/html/index.html
+[root@web1 ~]# systemctl restart httpd
+
+步骤三：部署LVS-NAT模式调度器
+1)确认调度器的路由转发功能(如果已经开启，可以忽略)
+[root@proxy ~]# echo 1 > /proc/sys/net/ipv4/ip_forward  #立刻有效，临时设置
+[root@proxy ~]# cat /proc/sys/net/ipv4/ip_forward        重启失效
+[root@proxy ~]# echo "net.ipv4.ip_forward = 1" >> /etc/sysctl.conf
+                                               #修改配置文件，设置永久规则,
+[root@proxy ~]# sysctl -p     #修改配置文件后，需执行此命令刷新才能生效
+
+内核优化：大多都在/proc/sys下
+
+2）创建集群服务器
+[root@proxy ~]# yum -y install ipvsadm
+[root@proxy ~]# ipvsadm -A -t 192.168.4.5:80 -s wrr 
+
+2）添加真实服务器
+[root@proxy ~]# ipvsadm -a -t 192.168.4.5:80 -r 192.168.2.100 -w 1 -m #NAT模式
+[root@proxy ~]# ipvsadm -a -t 192.168.4.5:80 -r 192.168.2.200 -w 1 -m
+
+3）查看规则列表，并保存规则
+[root@proxy ~]# ipvsadm -Ln
+[root@proxy ~]# ipvsadm-save -n > /etc/sysconfig/ipvsadm
+
+步骤四：客户端测试
+客户端使用curl命令反复连接http://192.168.4.5，查看访问的页面是否会轮询到不同的后端真实服务器。
+[root@client ~]# curl http://192.168.4.5
+
+######################################################################################
+
+3 案例3：部署LVS-DR集群------------客户端与web服务器在同一个网段
+使用LVS实现DR模式的集群调度服务器，为用户提供Web服务：
+	客户端IP地址为192.168.4.10
+	LVS调度器VIP地址为192.168.4.15
+	LVS调度器DIP地址设置为192.168.4.5
+	真实Web服务器地址分别为192.168.4.100、192.168.4.200
+	使用加权轮询调度算法，web1的权重为1，web2的权重为
+说明：
+	CIP是客户端的IP地址；
+	VIP是对客户端提供服务的IP地址；
+	RIP是后端服务器的真实IP地址；
+	DIP是调度器与后端服务器通信的IP地址（VIP必须配置在虚拟接口）
+
+步骤一：配置实验网络环境
+1）设置Proxy代理服务器的VIP和DIP
+注意：为了防止冲突，VIP必须要配置在网卡的虚拟接口！！！
+[root@proxy ~]# cd /etc/sysconfig/network-scripts/
+[root@proxy ~]# cp ifcfg-eth0{,:0}  #拷贝ifcfg-eth0为ifcfg-eth0:0
+[root@proxy ~]# vim ifcfg-eth0:0
+TYPE=Ethernet
+BOOTPROTO=none        #static/none静态IP、dhcp自动获取IP，底下就不用配ip了
+DEFROUTE=yes   
+NAME=eth0:0           #作为网卡的第二个ip
+DEVICE=eth0:0
+ONBOOT=yes           #是否开机自启：yes表示开机自启，no表示开机不自启
+IPADDR=192.168.4.15 
+PREFIX=24
+#geteway=192.168.2.5 #配置网关
+[root@proxy ~]# systemctl restart network
+
+2）设置Web1、2服务器网络参数
+[root@web1 ~]# nmcli connection modify eth0 ipv4.method manual \
+ipv4.addresses 192.168.4.100/24 connection.autoconnect yes
+[root@web1 ~]# nmcli connection up eth0
+
+接下来给web1配置VIP地址。
+注意：这里的子网掩码必须是32（也就是全255），网络地址与IP地址一样，广播地址与IP地址也一样。
+[root@web1 ~]# cd /etc/sysconfig/network-scripts/
+[root@web1 ~]# cp ifcfg-lo{,:0}
+[root@web1 ~]# vim ifcfg-lo:0
+DEVICE=lo:0          --------------设备名
+IPADDR=192.168.4.15
+NETMASK=255.255.255.255
+NETWORK=192.168.4.15       #网络地址
+BROADCAST=192.168.4.15     #广播地址
+ONBOOT=yes
+NAME=lo:0    --------------------设备名
+
+防止地址冲突的问题：
+这里因为web1也配置与代理一样的VIP地址，默认肯定会出现地址冲突；
+sysctl.conf文件写入这下面四行的主要目的就是访问192.168.4.15的数据包，只有调度器会响应，其他主机都不做任何响应，这样防止地址冲突的问题。
+[root@web1 ~]# vim /etc/sysctl.conf   #修改内核参数，防止冲突
+#手动写入如下4行内容
+net.ipv4.conf.all.arp_ignore = 1     #忽略，别人我是不是4.15，不回应
+net.ipv4.conf.lo.arp_ignore = 1      
+net.ipv4.conf.lo.arp_announce = 2 
+net.ipv4.conf.all.arp_announce = 2   #不主动宣告 ---控制的只是lo:0的
+#当有arp广播问谁是192.168.4.15时，本机忽略该ARP广播，不做任何回应
+#本机不要向外宣告自己的lo回环地址是192.168.4.15
+[root@web1 ~]# sysctl -p    -----#刷新配置文件，立即生效
+
+[root@web1 ~]# systemctl restart network
+[root@web1 ~]# ifconfig
+[root@web1 ~]# systemctl stop firewalld
+[root@web1 ~]# setenforce 0
+
+web2作与web1相同的操作：配置相同的VIP地址
+
+
+
+步骤二：配置后端Web服务器
+1）自定义Web页面
+[root@web1 ~]# yum -y install httpd
+[root@web1 ~]# echo "192.168.4.100" > /var/www/html/index.html
+[root@web2 ~]# yum -y install httpd
+[root@web2 ~]# echo "192.168.4.200" > /var/www/html/index.html
+
+2）启动Web服务器软件
+[root@web1 ~]# systemctl restart httpd
+[root@web2 ~]# systemctl restart httpd
+
+
+步骤三：proxy调度器安装软件并部署LVS-DR模式调度器
+1）安装软件（如果已经安装，此步骤可以忽略）
+[root@proxy ~]# yum -y install ipvsadm
+
+2）清理之前实验的规则，创建新的集群服务器规则
+[root@proxy ~]# ipvsadm -C                #清空所有规则
+[root@proxy ~]# ipvsadm -A -t 192.168.4.15:80 -s wrr
+
+3）添加真实服务器(-g参数设置LVS工作模式为DR模式，-w设置权重)
+[root@proxy ~]# ipvsadm -a -t 192.168.4.15:80 -r 192.168.4.100 -g -w 1
+[root@proxy ~]# ipvsadm -a -t 192.168.4.15:80 -r 192.168.4.200 -g -w 1
+
+4）查看规则列表，并保存规则
+[root@proxy ~]# ipvsadm -Ln
+[root@proxy ~]# ipvsadm-save -n > /etc/sysconfig/ipvsadm
+
+
+步骤四：客户端测试
+客户端使用curl命令反复连接http://192.168.4.15，查看访问的页面是否会轮询到不同的后端真实服务器。
+扩展知识：默认LVS不带健康检查功能，需要自己手动编写动态检测脚本，实现该功能：(参考脚本如下，仅供参考)
+[root@proxy ~]# vim check.sh
+#!/bin/bash
+VIP=192.168.4.15:80
+RIP1=192.168.4.100
+RIP2=192.168.4.200
+while :
+do
+   for IP in $RIP1 $RIP2
+   do
+           curl -s http://$IP &>/dev/vnull   # -s安静，不要输出东西
+if [ $? -eq 0 ];then  #网页能正常打开
+        ipvsadm -Ln |grep -q $IP || ipvsadm -a -t $VIP -r $IP  #当真实服务器没有的时候添加
+else  #网页不能正常打开
+        ipvsadm -Ln |grep -q $IP && ipvsadm -d -t $VIP -r $IP #将坏的服务器删除
+ fi
+   done
+sleep 1
+done
+            已经删除过的就不再删除---->ipvsadm -Ln | 
+         ping 192.168.2.$1          测主机，但服务坏
+	   curl http://192.168.2.$1   测服务，但网页被篡改
+				  
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,279 @@
+2019-02-28
+
+############################################################################
+
+Java:是一种跨平台的、面向对象的程序设计语言，java技术具有卓越的通用性、高效性、平台移植性和 安全性。
+
+Java体系：Java SE（标准版）
+         Java EE（企业版）
+         Java  ME（移动版）
+
+JDK是Sun针对java开发者推出的java语言的软件开发工具包
+JDK是整个java的核心：
+     包括了java运行环境、java工具（如编译、排错、打包等工具）、java基础的类库
+
+类库：大量工作中可能需要的功能，写成了类（函数）
+
+**********************************************************************************
+
+1 案例1：安装部署Tomcat服务器
+本案例要求部署Tomcat服务器，具体要求如下：
+	安装部署JDK基础环境
+	安装部署Tomcat服务器
+	创建JSP测试页面，文件名为test.jsp，显示服务器当前时间
+然后客户机访问此Web服务器验证效果：
+	使用火狐浏览器访问Tomcat服务器的8080端口，浏览默认首页
+	使用火狐浏览器访问Tomcat服务器的8080端口，浏览默认测试页面
+
+步骤一：部署Tomcat服务器软件(192.168.2.100/24)
+1）使用RPM安装JDK环境
+[root@web1 ~]# yum -y install  java-1.8.0-openjdk                //安装JDK
+[root@web1 ~]# yum -y install java-1.8.0-openjdk-headless        //安装JDK
+[root@web1 ~]# java -version                                    //查看JAVA版本
+
+2）安装Tomcat（apache-tomcat-8.0.30.tar.gz软件包，在lnmp_soft中有提供）
+-------解压完成即已安装
+[root@web1 ~]# tar -xf  apache-tomcat-8.0.30.tar.gz
+[root@web1 ~]# mv apache-tomcat-8.0.30  /usr/local/tomcat
+[root@web1 ~]# ls /usr/local/tomcat
+bin/                                  //主程序目录
+lib/                                  //库文件目录(类似于shell中的函数)
+logs/                                 //日志目录  
+temp/                                 //临时目录
+work/                                 //自动编译目录jsp代码转换servlet
+conf/                                 //配置文件目录
+webapps/                              //页面目录
+
+3）启动服务
+[root@web1 ~]# /usr/local/tomcat/bin/startup.sh     #启动服务
+[root@web1 ~]# /usr/local/tomcat/bin/shutdown.sh    #关闭服务（前提是要先开了服务）
+[root@web1 ~]# firewall-cmd --set-default-zone=trusted
+[root@web1 ~]# setenforce 0
+
+4）服务器验证端口信息(8080、8005、8009)
+[root@web1 ~]# netstat -nutlp |grep java        //查看java监听的端口
+
+提示：如果检查端口时，8005端口启动非常慢，可用使用下面的命令用urandom替换random（非必须操作）。
+[root@web1 ~]# mv /dev/random  /dev/random.bak
+[root@web1 ~]# ln -s /dev/urandom  /dev/random
+
+
+步骤二：修改Tomcat配置文件
+1）创建测试JSP页面
+[root@web1 ~]# vim  /usr/local/tomcat/webapps/ROOT/test.jsp
+<html>
+<body>
+<center>
+Now time is: <%=new java.util.Date()%>       //显示服务器当前时间
+</center>
+</body>
+</html>
+
+2）重启服务  (写一个页面，不需要重启，直接访问即可)
+[root@web1 ~]# /usr/local/tomcat/bin/shutdown.sh
+[root@web1 ~]# /usr/local/tomcat/bin/startup.sh
+
+步骤三：验证测试
+1）服务器验证端口信息
+[root@web1 ~]# netstat -nutlp |grep java        //查看java监听的端口
+
+2）客户端浏览测试页面(proxy充当客户端角色)
+[root@proxy ~]# firefox http://192.168.2.100:8080
+[root@proxy ~]# firefox http://192.168.2.100:8080/test.jsp
+
+
+#########################################################################
+
+2 案例2：使用Tomcat部署虚拟主机
+沿用练习二，使用Tomcat部署加密虚拟主机，实现以下要求：
+     *	实现两个基于域名的虚拟主机，域名分别为：www.a.com和 www.b.com
+     *	使用www.a.com域名访问的页面根路径为/usr/local/tomcat/a/ROOT
+     *	使用www.b.com域名访问的页面根路径为/usr/local/tomcat/b/base
+     *	访问www.a.com/test时，页面自动跳转到/var/www/html目录下的页面
+     *	访问页面时支持SSL加密通讯
+     *	私钥、证书存储路径为/usr/local/tomcat/conf/cert
+     *	每个虚拟主机都拥有独立的访问日志文件
+     *	配置tomcat集群环境
+
+步骤一：配置服务器虚拟主机
+1）修改server.xml配置文件，创建虚拟主机
+[root@web1 ~]# vim /usr/local/tomcat/conf/server.xml
+....
+   <server>
+      <service>
+          <connector port=8080 />
+	     <connector port=8009 />
+	     <Engine name="Catalina" defaultHost="localhost">
+           <Host name="域名1" appBase="网页根路径1"   unpackWARS="true" autoDeploy="true">
+	     </Host>        #每一个host是一个虚拟主机  unpackWAR是否开启自动解压（WAR包） autoDeploy是否开启自动部署
+ 	     <Host name="域名2" appBase="网页根路径2"  unpackWARS="true" autoDeploy="true" >
+	      <Context path="" docBase="base" />  #修改默认网页首页为base
+	    </Host>
+        </service> 
+    <server>
+
+
+2）创建虚拟主机对应的页面根路径
+[root@web1 ~]# mkdir -p  /usr/local/tomcat/{a,b}/ROOT
+[root@web1 ~]# echo "AAA"   > /usr/local/tomcat/a/ROOT/index.html
+[root@web1 ~]# echo "BBB" > /usr/local/tomcat/b/ROOT/index.html
+
+
+3）重启Tomcat服务器
+[root@web1 ~]# /usr/local/tomcat/bin/shutdown.sh
+[root@web1 ~]# /usr/local/tomcat/bin/startup.sh
+
+4）客户端设置host文件，并浏览测试页面进行测试(proxy充当客户端角色)
+[root@proxy ~]# vim /etc/hosts
+… …
+192.168.2.100      www.a.com  www.b.com
+[root@proxy ~]# firefox http://www.a.com:8080/        //注意访问的端口为8080
+[root@proxy ~]# firefox http://www.b.com:8080/
+
+
+步骤二：修改www.b.com网站的首页目录为base
+1）使用docBase参数可以修改默认网站首页路径
+[root@web1 ~]# vim /usr/local/tomcat/conf/server.xml
+… …
+
+<Host name="www.b.com" appBase="b" unpackWARS="true" autoDeploy="true">
+<Context path="" docBase="base"/>
+</Host>
+… …
+[root@web1 ~]# mkdir  /usr/local/tomcat/b/base
+[root@web1 ~]# echo "BASE" > /usr/local/tomcat/b/base/index.html
+[root@web1 ~]# /usr/local/tomcat/bin/shutdown.sh
+[root@web1 ~]# /usr/local/tomcat/bin/startup.sh
+
+
+步骤三：跳转
+1）当用户访问http://www.a.com/test打开/var/www/html目录下的页面
+[root@web1 ~]# vim /usr/local/tomcat/conf/server.xml
+… …
+    <Host name="www.a.com" appBase="a" unpackWARS="true" autoDeploy="true">
+     <Context path="/test" docBase="/var/www/html" />  #当访问www.a.com下的test是，自动跳转到/var/www/html
+    <Host>
+... ...
+
+[root@web1 ~]# echo "Test" > /var/www/html/index.html
+[root@web1 ~]# /usr/local/tomcat/bin/shutdown.sh
+[root@web1 ~]# /usr/local/tomcat/bin/startup.sh
+
+[root@proxy ~]# firefox http://www.a.com:8080/test    
+//返回/var/www/html/index.html的内容
+//注意，访问的端口为8080
+
+
+步骤四：配置Tomcat支持SSL加密网站--(只做一次加密，所有的网站都是加密的)
+1）创建加密用的私钥和证书文件
+[root@web1 ~]# keytool -genkeypair -alias tomcat -keyalg RSA -keystore /usr/local/tomcat/keystore    //提示输入密码为:123456
+//-genkeypair      生成密钥对
+//-alias tomcat    密钥别名
+//-keyalg RSA      定义密钥算法为RSA算法
+//-keystore        定义密钥文件存储在:/usr/local/tomcat/keystore
+
+2)再次修改server.xml配置文件，创建支持加密连接的Connector
+[root@web1 ~]# vim /usr/local/tomcat/conf/server.xml
+… …
+<Connector port="8443" protocol="org.apache.coyote.http11.Http11NioProtocol"
+maxThreads="150" SSLEnabled="true" scheme="https" secure="true"
+keystoreFile="/usr/local/tomcat/keystore" keystorePass="123456" clientAuth="false" sslProtocol="TLS" />
+//备注，默认这段Connector被注释掉了，打开注释，添加密钥信息即可
+
+
+步骤五：配置Tomcat日志
+1)为每个虚拟主机设置不同的日志文件
+
+
+
+
+
+
+#############################################################################
+
+3 案例3：使用Varnish加速Web
+通过配置Varnish缓存服务器，实现如下目标：
+	使用Varnish加速后端Web服务
+	代理服务器可以将远程的Web服务器页面缓存在本地
+	远程Web服务器对客户端用户是透明的
+	利用缓存机制提高网站的响应速度
+	使用varnishadm命令管理缓存页面
+	使用varnishstat命令查看Varnish状态
+
+CDN(内容分发网络)---大型企业才自己做
+
+Varnish+缓存功能
+
+
+步骤一：构建Web服务器-----(准备后台web服务器,appache,nginx都可以)
+1）使用yum安装web软件包
+[root@web1 ~]# yum  -y  install  httpd
+
+2）启用httpd服务（注意需要关闭nginx，否则端口冲突）
+
+3）为Web访问建立测试文件
+[  ]# echo "192.168.2.100" >/var/www/html/index.html
+
+4）测试页面是否正常（代理服务器测试后台web）
+[root@proxy ~]# firefox http://192.168.2.100
+
+
+步骤二：部署Varnish缓存服务器(192.168.4.5)  -----源码安装
+所需依赖包：gcc readlince-devel ncurses-devel pcre-devel 
+          python-docutils-0.11-0.2.20130715svn7687.el7.noarch.rpm
+
+1）编译安装软件(python-docutils默认光盘中没有，需要在lnmp_soft中找)
+[root@proxy ~]# yum -y install gcc readline-devel    //安装软件依赖包
+[root@proxy ~]# yum -y install ncurses-devel         //安装软件依赖包
+[root@proxy ~]# yum -y install pcre-devel            //安装软件依赖包
+[root@proxy ~]# yum -y install \
+python-docutils-0.11-0.2.20130715svn7687.el7.noarch.rpm    //安装软件依赖包
+[root@proxy ~]# useradd -s /sbin/nologin varnish           //创建账户
+[root@proxy ~]# tar -xf varnish-5.2.1.tar.gz             
+[root@proxy ~]# cd varnish-5.2.1 
+[root@proxy varnish-5.2.1]# ./configure                  //运行
+[root@proxy varnish-5.2.1]# make && make install         //编译和安装
+
+2）复制启动脚本及配置文件
+[root@proxy varnish-5.2.1]# cp  etc/example.vcl   /usr/local/etc/default.vcl
+
+3）修改代理配置文件
+[root@proxy ~]# vim  /usr/local/etc/default.vcl
+backend default {            #定义后台服务器
+     .host = "192.168.2.100";
+     .port = "80";
+ }
+
+4）启动服务
+[root@proxy ~]# varnishd  -f /usr/local/etc/default.vcl
+//varnishd命令的其他选项说明如下：
+//varnishd –s malloc,128M        定义varnish使用内存作为缓存，空间为128M
+//varnishd –s file,/var/lib/varnish_storage.bin,1G 定义varnish使用文件作为缓存
+
+步骤三：客户端测试
+1)客户端开启浏览器访问
+[root@client ~]# curl http://192.168.4.5
+
+步骤四：其他操作
+1）查看varnish日志
+[root@proxy ~]# varnishlog                 //varnish日志
+[root@proxy ~]# varnishncsa                //访问日志
+2）更新缓存数据，在后台web服务器更新页面内容后，用户访问代理服务器看到的还是之前的数据，说明缓存中的数据过期了需要更新（默认也会自动更新，但非实时更新）。
+[root@proxy ~]# varnishadm  
+varnish> ban req.url ~ .*   #"~"两边都要有空格
+                                   //清空缓存数据，支持正则表达式
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

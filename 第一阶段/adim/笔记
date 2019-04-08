@@ -1,0 +1,306 @@
+Linux命令：
+  -用来实现某一类功能的指令或程序（执行大多数命令，找到相应程序进行运行）
+
+  -命令的执行依赖于解释器（默认解释器：/bin/bash)
+
+    用户命令---->翻译器--->内核--->硬件
+                                           #绿色：代表可执行的程序
+
+Linux命令的分类：
+  -内部命令：属于解释器的一部分
+
+  -外部命令：解释器之外的其他程序
+
+  
+####################################################################################
+
+命令行的一般格式
+
+选项，调控命令的执行方式
+  -短选项：-l、-A、-c、-d、 ..
+  -多个短选项-->复合选项：-lh、-lA、-ld、.. ..
+  -长选项：--help、.. ..
+参数：命令的操作对象，如目录或文件
+
+
+快速编辑技巧
+Tab键自动补全：
+   -可补齐命令、选项、参数、文件路径、软件名、服务名
+快捷键：
+   -Ctrl +I :清空整个屏幕     #连续两次tab键，显示以if开头的命令
+   -Ctrl +u :清空至行首
+   -Ctrl +w :往回删除一个单词（以空格界定）
+   -Ctrl +c :废弃当前编辑的命令行
+   -Esc+ .或者Alt+. :粘贴上一个命令的参数
+
+#######################################################################################
+mount挂载 
+挂载，装载：
+        -将光盘/U盘/分区/网络存储等设备装到某个Linux目录
+        -各种命令工具通过访问Linux目录来操作这些设备
+ 
+从系统光盘中获得软件包
+
+windows 
+
+Linux：识别光盘内容，在Linux中访问设备内容，必须通过访问点
+  
+   光盘----->光驱设备----->目录（访问点）
+           /dev/cdrom
+1.图形将光盘镜像文件放入虚拟光驱设备
+2.命令行查看光驱设备文件
+[root@gg]# ls /dev/cdrom
+ /dev/cdrom                      #青色：代表快捷方式
+
+[root@gg]# ls -l /dev/cdrom
+
+[root@gg]# ls /dev/sr0    #真正的光驱设备名
+
+3.创建目录
+使用mount命令
+  --格式：mount 设备路径  挂载点目录  #让目录成为设备的访问点
+[root@gg]# mkdir /ak47
+[root@gg]#ls /ak47
+[root@gg]#mount /dev/cdrom/ak47
+mount:/dev/sr0 写保护，将以只读方式挂载
+[root@gg]#ls /ak47
+[root@gg]#ls /ak47/Packages
+
+
+总结：
+   1.Linux访问点为一个目录
+   2.mount命令，让目录成为设备的访问低点
+    3.一个设备可以有多个访问点；一个访问点不可以有多个设备
+
+ 注意事项：
+  1.卸载：当前路径不要在访问点路径内
+    [root@gg ak47]#umount /ak47
+      umount:/ak47 忙
+
+
+
+
+##########################################################################
+
+cd  
+
+  .表示当前目录
+  ..表示父目录
+   
+   ～user表示用户user的家目录
+   ~表示用户的家目录
+    家目录：存放用户 自定义 或 个性化 数据的目录
+    /root：管理员root的家目录
+     /home:存放所有普通用户的家目录
+
+
+ls -list
+ -格式：ls [选项]...[目录或文件名]
+
+常用命令选项
+  -- -l ：以长格式显示
+   -- -A :包括名称以 . 开头的隐藏文档
+   -- -d :显示目录本身（而不是内容）的属性
+   -- -h：提供易读的容量单位（K、M等）
+
+
+######################################################################
+使用通配符
+针对不确定的文档（包括目录和文件）名称，以特殊字符表示
+  -- * ：任意多个任意字符（字数不限，字符不限）
+  -- ？：单个字符
+
+针对不确定的文档（包括目录和文件）名称，以特殊字符表示
+  -- [a-z]:多个字符或连续范围中的一个，若无则忽略
+   -- {a,min ,xy,}:多组不同的字符串，全匹配
+
+
+#########################################################
+
+别名的定义
+ 查看已设置的别名
+  -- alias [别名名词]
+定义新的别名
+   -- alias 别名名称=‘实际执行的命令行’
+取消已设置的别名
+   -- unalias [别名名称]
+
+
+制作别名qstat  --执行qstat可以运行/bin/ps -Ao pad,tt,user,fname,rsz
+[  ]# alias qstat='/bin/ps -Ao pad,tt,user,fname,rsz'
+[  ]# qstat
+
+
+
+################################################################
+
+mkdir 创建目录
+[  ]#mkdir [-p] [/路径/]目录名...
+
+ [  ]#mkdir -p /vod/movie/cartoom   #-p表示连父目录一起创建
+  [  ]#mkdir -R /vod/     #递归显示  
+
+
+rm 删除
+  rm--remove
+    --格式：rm [选项]..文件或目录
+常用命令选项
+  -- -r (删除目录、文件）、-f（删除文件，不能删除目录）
+
+
+mv 移动/改名
+ mv-move
+[  ]#mkdir /opt/nsd
+[  ]#touch /opt/1.txt
+[  ]#mv /opt/1.txt  /opt/nsd
+
+重命名：路径不变的移动
+[  ]#mv /opt/nsd/  /opt/abc
+[  ]#ls /opt
+[  ]#abc
+
+
+cp 复制
+
+-- -r :递归，复制目录时必须有此选项
+
+
+复制时出现同名重复，取消提示
+在本次操作临时取消别名
+[  ]#\cp -r /boot/  /mnt/
+
+
+复制支持两个及以上多个参数
+   永远认为最后一个参数为目标路径，其他的所有参数都作为源
+
+复制支持一个点的应用：.表示当前路径
+[root@ggg ~]# cp -r /etc/passwd /etc/fstab  /boot/ /home/ /etc/redhat-release /mnt/
+[root@ggg ~]# ls /mnt
+boot  fstab  home  passwd  redhat-release
+[root@ggg ~]# cd /mnt
+[root@ggg mnt]# ls
+boot  fstab  home  passwd  redhat-release
+[root@ggg mnt]# pwd
+/mnt
+[root@ggg mnt]# cp /etc/hosts  .
+[root@ggg mnt]# ls 
+boot  fstab  home  hosts  passwd  redhat-release
+[root@ggg mnt]# cd /etc/pki/CA
+[root@ggg CA]# pwd
+/etc/pki/CA
+[root@ggg CA]# ls
+certs  crl  newcerts  private
+[root@ggg CA]# cp /etc/shells .
+[root@ggg CA]# ls
+certs  crl  newcerts  private  shells
+
+复制时。可以重命名目录路径 文档的名称
+[root@ggg CA]# cp -r /home/  /mnt/test  #将home放到mnt下改名为test
+[root@ggg CA]# cp -r /home/  /mnt/test  #将home放到/mnt/test目录下
+[root@ggg CA]# ls /mnt
+test
+[root@ggg CA]# ls /mnt/test/
+home  lisi  nihao  tom  zhangsan
+[root@ggg CA]# 
+
+##############################################################
+
+vim文本编辑器：修改文件内容
+
+模式：命令模式    输入模式（插入模式）   末行模式
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

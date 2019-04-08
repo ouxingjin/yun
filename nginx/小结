@@ -1,0 +1,290 @@
+查看nginx服务状态及监听端口
+[  ]# netstat -antulp | grep nginx
+或者
+[  ]# ss -antulp | grep nginx
+
+修改配置文件;
+[  ]# vim /usr/local/nginx/conf/nginx.conf
+ ....
+     location /status {
+ 	   stub_status on;
+	   #allow ip地址;
+	   #deny ip地址;
+       }
+
+
+
+步骤三：优化并发访问量
+#使用ab高访问量测试
+1）[  ]# ab -c 2000 -n 2000 http://192.168.4.5/
+
+2）修改配置文件
+[  ]# vim /usr/local/nginx/conf/nginx.conf
+    ...
+       worker_processes 2;  #与CPU核心数一致（实验中为1）
+   events {
+         worker_connections 65535; #每一个worker最大并发连接数
+     }
+3）优化linux参数
+[  ]# ulimit  -a  #查看所有属性值
+[  ]# ulimit -Hn 100000  #设置临时硬限制
+[  ]# ulimit -Sn 100000  #设置临时软限制
+[  ]# vim /etc/security/limit.conf
+       ....
+   *    soft   nofile    100000;
+   *    hard   nofile    100000;
+   
+
+步骤四：优化nginx包头数据缓存
+1）优化前使用脚本测试
+[  ]# bash buffer.sh   #失败
+
+2）修改配置文件，增加数据包头部缓存大小
+[  ]# vim /usr/local/nginx/conf/nginx.conf
+ .....
+   http {
+    client_header_buffer 1k;         #默认请求包头信息的缓存
+    large_user_header_buffers 4 4k;  #大请求包头信息缓存的个数与容量
+   }
+
+优化后，执行相同的脚本，可以得到结果
+
+
+步骤五：浏览器本地缓存静态数据
+1）清空firefox本地静态缓存
+
+2）修改配置文件，设置对静态页面的缓存时间
+[  ]# vim /usr/local/nginx/conf/nginx.conf
+    ....
+    location ~* \.(jpg|png)$ {
+      expires  30d;   #定义客户端缓存时间为30天
+      }
+
+重启nginx服务
+[  ]# firefox 192.168.4.5/day.jpg
+
+
+步骤六：日志切割
+1）将旧日志进行备份
+2）kill USR1 PID（nginx的进程号）
+[  ]# cat /usr/local/nginx/logs/nginx.pid  #查看nginx的进程号
+
+[  ]# mv /usr/local/nginx/logs/access.log /usr/local/nginx/logs/access.old
+[  ]# kill USR1 /usr/local/nginx/logs/nginx.pid
+
+实现自动完成日志切割：
+[  ]# vim /usr/local/nginx/lodback.sh
+ #!/bin/bash
+  date=`date +%Y-%m-%d`
+  logpath=/usr/local/nginx/logs
+   mv $logpath/access.log $logpath/access-$date.log
+   mv $logpath/error.log  $logpath/error-$date.log
+   kill -USR1 $(cat $logpath/nginx.pid)
+
+[  ]# crontab -e
+03  03 * * 5 /usr/local/nginx/logback.sh
+
+
+
+
+第三套练习：
+model11 : 192.168.4.20
+model12 : 192.168.4.10   192.168.2.10
+model13 : 192.168.2.30
+model14 : 192.168.2.60
+
+
+
+部署LNMP（linux  nginx mariadb php/python..）
+需要安装的软件包：nginx  mariadb mariadb-server mariadb-devel
+                  php php-mysql php-fpm
+
+修改配置文件（实现curl和火狐访问相同连接返回的也面不同）
+1）创建网页目录以及对应的页面文件
+[  ]# echo "normal page" > /usr/local/nginx/html/test.html
+[  ]# mkdir -p /usr/local/nginx/html/firefox/
+[  ]# echo "firefox page" >/usr/local/nginx/html/firefox/test.html
+
+2)修改配置文件 
+[  ]# vim /usr/local/nginx/conf/nginx.conf
+   ....
+       location / {
+	   root html;
+	    index index.html index.htm;
+        }
+if ($http_user_agent ~* firefox) {
+    rewrite ^(.*)$ /firefox/$1;
+    }
+
+
+切割日志：
+1）将旧日志进行备份
+2)kill -USR1 PID(cat /usr/local/nginx/logs/nginx.pid)
+
+
+实现自动切割：编写脚本，放入周期性计划任务中执行
+[  ]# vim /root/logback.sh
+#!/bin/bash
+#定义两个变量date、logpath
+   date="date +%Y-%m-%d"
+   logpath=/usr/local/nginx/logs
+#将老的日志文件进行备份
+   mv $logpath/access.log  $logpath/access-$date.log
+   mv $logpath/error.log   $logpath/error-$date.log
+#进行kill -USR1 PID操作
+   kill -USR1 `cat /usr/local/nginx/logs/nginx.pid`
+
+[  ]#  chmod +x /root/logpath.sh
+
+#将脚本写入周期性计划任务:每周五的六点30进行一次日志切割
+[  ]# crontab -e
+30   06   *   *  5   /root/logpath.sh 
+
+
+
+###################################################################3
+
+查看nginx服务信息及监听端口
+1)监听端口信息
+[  ]# ss -antulp | grep nginx
+或者
+[  ]# netstat -antulp | grep nginx
+
+2)nginx服务信息
+修改配置文件
+[  ]# vim /usr/local/nginx/conf/nginx.conf
+  ....
+      location / {
+	    root html;
+	   index index.html index.htm;
+        }
+       location /status {
+	     stub_status on;
+	      #allow ip地址;
+	      #deny ip地址;
+        }
+[  ]#  firefox 127.0.0.1/status
+
+#######################################################################3
+
+优化包头信息过长：
+1)修改nginx配置文件
+[  ]# vim /usr/local/nginx/conf/nginx.conf
+.....
+    http {
+client_header_buffer_size 1k;
+large_client_header_buffers 4 4M;
+
+.......
+   }
+优化后，再执行相同的脚本，可以得到相应
+
+
+#######################################################################
+
+优化并发访问量：
+1）优化前使用ab高并发访问测试
+[  ]# ab -n 2000 -c 2000 http://192.168.4.5/    # -n多少人访问、-c共访问了多少次
+
+2）优化：一个是修改nginx配置文件、二是对linux参数进行优化
+[  ]# vim /usr/local/nginx/conf/nginx.conf
+    ....
+        worker_processes  1; #实验中不能修改（实际工作中修改为与CPU核心数一致）
+     events {
+           worker_connections 65535; #每一个worker的最大连接数
+           use epoll;
+      }
+
+[  ]# ulimit -a  #查看所有属性信息
+[  ]# ulimit -Hn 100000  #设置硬限制（临时规则）
+[  ]# ulimit -Sn 100000  #设置软限制（临时规则）
+[  ]# vim /etc/recurity/limit.conf  #永久修改限制，需要重启才能生效
+       *     soft     nofile    100000;
+       *     hard     nofile    100000;
+
+#########################################################################
+
+浏览器本地缓存静态数据：
+1）先清空firefox浏览器静态页面缓存数据
+
+2）修改nginx配置文件，设置静态页面的缓存时间
+[  ]# vim /usr/local/nginx/cong/nginx.conf
+.........
+      server {
+    	  listen 80;
+	  server_name localhost;
+   	location / {
+	   root html;
+	    index  index.html  index.htm;
+        }    
+     	location  ~* \.(jpg|png|gif|jpeg)$  {
+	    expires  30d;
+      }
+}
+
+[  ]# cp /usr/share/backgrounds/day.jpg  /usr/local/nginx/conf/html
+访问测试：
+[  ]# firefox http://192.168.4.5/day.jpg
+
+#######################################################################
+
+
+20 : client 192.168.4.10
+21 : proxy  192.168.4.20  192.168.2.20
+22 : web1    192.168.2.40
+23 : web2    192.168.2.80
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,261 @@
+2019-03-29
+
+local库:存放
+config库：存放分片信息
+#############################################################################################
+
+一、MongoDB副本集（集群）
+1 环境准备
+    1.1 副本集介绍：（也称为mongodb复制）
+	1）指在多个服务器上存储数据副本，并实现数据同步
+	2）提高数据可用性、安全性、方便数据故障恢复
+
+   1.2 MongDB复制原理
+	1）副本集工作过程：
+	*至少需要两个节点，其中一个是主节点，负责处理客户端请求，其余是从节点，负责复制主节点数据
+	*常见搭配方式：一主一从、一主多从
+	*主节点记录所有操作oplog，从节点定期轮询主节点获取这些操作，然后对自己的数据副本执行这些
+	操作，从而保证从节点的数据与主节点一致
+
+  1.3 副本集实现方式
+	1）Master-slave主从复制
+	*启动一台服务器时加上“-master”参数，这台服务器就变成了主节点
+	*启动其他服务器时加上“-slave”和“-source”参数，就变成了从节点
+
+	2）主从复制的优点
+	
+
+
+
+
+
+
+########################################################################################
+
+2 配置Replica Sets
+    2.1 开启副本集功能：51 52 53
+	]# /usr/local/mongodb/bin/mongod -f /usr/local/mongodb/etc/mongodb.conf --shutdown
+	]# vim /usr/local/mongodb/etc/mongodb.conf 
+	  .....
+   	 replSet=集群名称(rs1)      #开启副本集功能
+   2.2 重启mongodb服务:
+	]# /usr/local/mongodb/bin/mongod -f /usr/local/mongodb/etc/mongodb.con
+
+   2.3 创建副本集成员列表（在哪台上创建都可以，就是主节点）---实验用51作为主节点
+	]# /usr/local/mongodb/bin/mongo --host 192.168.4.51 --port 27051
+		> config = {
+		... _id:"rs1",
+		... members:[
+		... {_id:0,host:"192.168.4.51:27051",priority 30 }, #可以定义优先级
+		... {_id:1,host:"192.168.4.52:27052",priority 20}},  #当
+		... {_id:2,host:"192.168.4.53:27053"}
+		... ]
+		... };
+  2.4 初始化（创建副本集）
+> rs.initiate(config)  #上方定义config，导入参数config
+	............
+	"ok" : 1,   #提示"ok"的结果为1 表示创建成功
+	.........
+rs1:SECONDARY> 
+rs1:PRIMARY> 
+
+	#创建成功，可以在local库中看到相对应副本集的信息；
+	#不能在副本集从库上做任何数据操作，从库只是同步主库的数据
+
+rs1:PRIMARY> use local  #切换到local库
+switched to db local
+rs1:PRIMARY> show tables   #local库中有相对应的副本集信息
+me
+oplog.rs
+replset.election
+replset.minvalid
+startup_log
+system.replset
+system.rollback.id
+
+  2.5 查看集群状态信息（任何一台副本集主机都可以执行）
+	> rs.status()  
+	......
+	"health" : 1,  #值为1，表示正在运行
+	"state" : 1,   #值为1---->主库，值为2--->从库
+	"stateStr" : "PRIMARY",  #主库primary,从库second
+	"syncingTo" : "192.168.4.51:27051",  #从主库51上同步数据
+	.........
+  2.6 查看是否是master库
+	> rs.isMaster()  #会列出副本集成员列表
+	.....
+	"setName" : "rs1",   #副本集名称
+	"setVersion" : 1,    #运行状态
+	"ismaster" : true,   #是master库
+	"secondary" : false, #不是从库 
+	"primary" : "192.168.4.51:27051",   #主库是哪台主机
+	"me" : "192.168.4.51:27051",        #本机的ip地址和端口
+	......
+  2.7 同步数据验证，允许从库查看数据
+rs1:PRIMARY> db.getMongo().setSlaveOk()  #在从库上执行后，可以查看数据  
+
+__________________________________________________________________
+排错：副本集创建不成功
+  51 / 52 / 53
+1）注释开启副本集功能
+2）关闭服务
+
+]# vim /use/local/mongodb/etc/mongodb.conf  #注释开启副本集功能
+	....
+	#replSet=rs1
+
+
+
+————————————————————————————————————————————————————————
+3 测试副本集（集群）
+   3.1 复制功能
+
+   3.2 高可用功能：当主库宕机后，会自动从从库中选取一台来作为新的主库
+	]# /usr/local/mongodb/bin/mongod -f 
+	    /usr/local/mongodb/etc/mongodb.conf --shutdown  #关闭51 mongob服务 
+
+   3.3 故障自动恢复：当故障的主机51 重新连接后，会自动成为新主库的从库，并且会同步新主库的数据
+
+   3.4 高可用功能时，怎么从多个副本主机选举新主库？（的过程）
+	1）当51 正常运行时，52 53 定期连接51的27051端口
+	2）当51主机宕机后，最先发现主机51 宕机的52 从库主机会发送要当新主库的请求
+	3）53同意52 成为新主库的三步骤：
+	   #先去连接一下51 主库，发现连接不上
+	   #查看集群中是否有新的主库产生，
+	   #查看自己本机是否有成为主库的能力，等30s后，承认52为新的主库
+
+
+###########################################################################################
+二、MongoDB文档管理
+  2.1 查询文档 ：
+	1）find()      #显示所有内容
+	2）findOne()   #显示第一行
+	3）find({条件}) #指定条件查询
+	4）find({条件},{定义显示的字段})  #指定查询条件并指定显示的字段
+	5）find().count()  #统计文档条目数
+	6）find().sort()   #1表示升序，-1 表示降序
+	7）find().skip()   #跳过前几行
+	8）find().limit()  #显示前几行
+
+> db.user.find({},{_id:0,name:1,shell:1})  #0不显示，1显示
+
+  2.2 更新文档
+	1）db.集合名.update({条件},{修改的字段})   #有条件的更新
+	2）db.集合名.update({},{修改的字段}) #无条件的更新，值修改第一条
+> db.t2.update({},{age:100}) #修改第一条文档，且表中第一条其他字段全删除，只剩下age字段，值为100
+> db.user.update({shell:"/sbin/nologin"},{gid:1010}) #匹配的一条文档，其他字段被删除，只剩下gid字段
+
+命令：$set $unset $inc  $push  $addToSet
+1) $set:
+> db.集合名.update({条件},{$set:{修改的字段}},false,true) #$set，只修改匹配条件的指定字段的值
+> db.user.update({shell:"/bin/bash"},{$set:{uid:1000,comment:"goodgame"}},false,true)
+
+2) $unset:
+> db.集合名.update({条件},{$unset:{key:value}},false,true) #$unset，删除与匹配条件的指定字段和值
+> db.user.update({uid:2},{$unset:{comment:"daemon",homedir:"/sbin"}},false,true)
+
+3) $inc:条件匹配时,字段值自加或自减 2表示自加2,-1表示自减 1
+> db.user.update({条件},{$inc:{字段名:数字}},false,true) 
+> db.user.update({
+
+4) $push:向数组中添加新元素
+> db.集合名.update({条件},{$push:{数组名:"值"}})
+> db.t3.insert({name:"bob",like:["a","b","c","d","e","f"]})
+> db.t3.update({name:"bob"},{$push:{like:"w"}})  #向数组like中添加值w
+
+5) $addToSet:避免重复添加
+> db.集合名.update({条件},{$addToSet:{数组名:"值"}})
+> db.t3.update({name:"bob"},{$addToSet:{likes:"f"}})
+
+6) $pop:从数组头部删除一个元素
+> db.t4.update({name:"bob"},{$pop:{like:1}})  # 1 删除数组尾部元素
+> db.t4.update({name:"bob"},{$pop:{like:-1}}) # -1 删除数组头部元素
+
+7) $pull:删除数组指定元素
+> db.集合名.update({条件},{$pull:{数组名:"值"}})
+> db.t4.update({name:"bob"},{$pull:{like:"c"}})
+
+
+  2.3 插入文档
+	1）db.集合名.save({key:“值”,key:"值"})
+	    #集合不存在时创建集合，然后再插入记录
+	    #_id字段值已存在时，修改文档字段值
+	    #_id字段值不存在时，插入文档
+	2）db.集合名.insert({key:"值",key:"值"})
+	    #集合不存在时创建集合，然后再插入记录
+    	    #_id字段值已存在时，放弃插入
+	    #_id字段值不存在时，插入文档
+	3）db.集合名.insertMany([     #插入多条记录
+		   {name:"",age:""},
+		   {name:"",email:""} ])
+
+> db.t1.save({_id:1,name:"bob"})
+> db.t2.insert({_id:1,name:"jim"})
+
+> db.t1.save({_id:1,name:"jack"}) #将原来t1中的值改为了“jack”
+> db.t2.insert({_id:1,name:"admin"}) #id字段已存在，报错，放弃插入
+
+> db.t2.insertMany([{name:"chihiro",age:21},{name:"wangerniu",age:55}])
+
+  2.4 删除文档
+	1）db.集合名.remove({条件}) 
+	 #不条件时，就是删除所有记录；有条件时，只删除匹配条件的文档；集合内的索引还在
+	2）db.集合名.drop()  #删除集合，内部结构和索引全部删除
+
+
+
+  1.5 更新  删除  查询  匹配条件
+	1）相等
+	    > db.user.find({name:"sync"},{_id:0,name:1,gid:1})
+	2）逻辑与
+	    > db.user.find({name:"sync",gid:1},{_id:0,name:1,gid:1})
+	3）逻辑或 $or
+	    > db.user.find({$or:[{条件1},{条件2}...]})
+	    > db.user.find({$or:[{uid:14},{uid:32},{name:"adm"}]},{_id:0,name:1,uid:1})
+	4）范围比较 $in:在...里  $nin：不在...里
+	   > db.user.find({uid:{$in:[1,3,7]}},{_id:0,name:1,uid:1})
+	   > db.user.finf({shell:{$nin:["/bin/bash","/sbin/nologin"]},{_id:0,name:1,shell:1})
+
+数值比较：
+		$lt  $lte  $gt  $gte  $ne
+		<     <=     >    >=     !=
+	> db.user.find({uid:{$gte:100,$lte:300}},{_id:0,name:1,uid:1})
+正则匹配：
+	> db.user.find({name:/^r/},{_id:0,name:1,uid:1})
+	> db.user.find({name:/a/},{_id:0,name:1,uid:1})
+匹配null
+	> db.user.insert({name:null,uid:888,gid:555})
+	> db.user.find({name:null},{_id:0})  #显示除了id字段
+
++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

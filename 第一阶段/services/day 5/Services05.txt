@@ -1,0 +1,305 @@
+检测新的教学环境
+
+    虚拟机A:服务端 
+       1)主机名:svr7.tedu.cn
+    2)eth0IP地址:192.168.4.7/24
+    3)Yum仓库:yum clean all ----> yum repolist   
+    虚拟机B:客户端
+       1)主机名:pc207.tedu.cn
+    2)eth0IP地址:192.168.4.207/24
+    3)Yum仓库:yum clean all ----> yum repolist 
+
+
+######################################################
+总结：
+    DHCP-----》IP地址、next-server、filename
+    tftp-----》pxelinux.0
+    pxelinux.0-----》读取菜单文件  default
+    default-----》vesamenu.c32 、splash.png  ks.cfg ....... 
+    ks.cfg-----》root密码   分区   时区 .......
+                 url --url="http://192.168.4.7/rhel7"
+#######################################################
+
+课外扩展:  
+   让客户端安装完系统,Yum仓库可用(利用ks应答文件安装后脚本实现)
+
+   服务端：真机利用FTP提供光盘所有内容
+         PXE网络装机服务器
+
+   客户端：安装完成的机器
+
+在PXE服务器上修改ks应答文件：
+%post --interpreter=/bin/bash
+useradd   lisi
+echo 123  |  passwd --stdin  lisi
+rm -rf /etc/yum.repos.d/*
+echo '
+[rhel7]
+name=rhel7.4
+baseurl=ftp://192.168.4.254/rhel7
+enabled=1
+gpgcheck=0'  > /etc/yum.repos.d/dvd.repo
+
+%end
+
+
+在PXE服务器上修改ks应答文件：
+%post --interpreter=/bin/bash
+useradd   lisi
+echo 123  |  passwd --stdin  lisi
+rm -rf /etc/yum.repos.d/*
+cd /etc/yum.repos.d/
+wget http://192.168.4.7/rhel7.repo
+
+%end
+
+######################################################
+rsync同步操作
+
+• 命令用法
+– rsync [选项...] 源目录    目标目录
+
+• 同步与复制的差异
+– 复制:完全拷贝源到目标
+– 同步:增量拷贝,只传输变化过的数据
+
+• rsync操作选项
+– -n:测试同步过程,不做实际修改
+– --delete:删除目标文件夹内多余的文档
+– -a:归档模式,相当于-rlptgoD
+– -v:显示详细操作信息
+– -z:传输过程中启用压缩/解压
+
+• 本地同步
+– rsync [选项...] 本地目录1      本地目录2     //同步整个文件夹
+– rsync [选项...] 本地目录1/    本地目录2     //只同步目录下的数据
+
+
+虚拟机A：本地目录同步
+实现本地目录/nsd内容  同步到   /dir目录
+
+[root@svr7 /]# mkdir /nsd
+[root@svr7 /]# mkdir /dir
+[root@svr7 /]# cp /etc/passwd /etc/fstab  /nsd
+[root@svr7 /]# ls /nsd
+[root@svr7 /]# ls /dir
+
+[root@svr7 /]# rsync -avz /nsd/    /dir/
+[root@svr7 /]# ls /nsd
+[root@svr7 /]# ls /dir
+
+[root@svr7 /]# touch /nsd/1.txt
+[root@svr7 /]# rsync -avz /nsd/    /dir/
+[root@svr7 /]# ls /nsd
+[root@svr7 /]# ls /dir
+
+[root@svr7 /]# touch /dir/{10..15}.txt      
+[root@svr7 /]# ls /dir
+[root@svr7 /]# ls /nsd
+
+[root@svr7 /]# rsync -avz --delete /nsd/  /dir
+[root@svr7 /]# ls /dir
+[root@svr7 /]# ls /nsd
+
+[root@svr7 /]# mkdir /nsd/test
+[root@svr7 /]# ls /dir
+[root@svr7 /]# ls /nsd
+[root@svr7 /]# rsync -avz --delete /nsd/  /dir
+[root@svr7 /]# ls /dir
+[root@svr7 /]# ls /nsd
+
+######################################################
+虚拟机A与虚拟机B远程同步
+实现虚拟机A /opt  与  虚拟机B /opt 目录的同步
+ 
+• 与远程的 SSH目录保持同步
+– 下行:rsync [...]  user@host:远程目录     本地目录
+– 上行:rsync [...]  本地目录   user@host:远程目录
+
+虚拟机A：
+]# rm -rf /opt/*
+]# cp /etc/resolv.conf /etc/hosts /opt/
+]# ls /opt/
+
+]# rsync -avz --delete /opt/ root@192.168.4.207:/opt/
+
+虚拟机B：
+[root@pc207 /]# ls /opt/
+
+#####################################################
+ 实时同步数据
+
+一 前提ssh实现无密码验证
+1.生成公钥 与私钥 
+]# ssh-keygen #一路敲回车
+]# ls /root/.ssh
+
+2.传递公钥到对方服务器
+]# ssh-copy-id root@192.168.4.207
+root@192.168.4.207's password: 
+
+3.验证同步无需密码
+]# rsync -avz --delete /opt/ root@192.168.4.207:/opt/
+
+
+
+/root/.ssh/known_hosts:记录曾经远程管理过的主机信息
+
+
+
+
+二 监控目录/opt/变化
+
+• Linux内核的 inotify 机制
+ – 提供事件响应式的文件系统通知机制
+ – 安装 inotify-tools 控制工具可调用此机制实现监控
+
+inotify-tools：源码包
+
+rpm包：  rpm  -ivh      yum 
+
+源码包-----make  gcc-----》可以执行的程序----------》运行安装
+
+源码编译安装的优势
+• 主要优点
+– 获得软件的最新版,及时修复bug
+– 软件功能可按需选择/定制,有更多软件可供选择
+– 源码包适用各种平台
+
+步骤1:安装gcc与make开发工具
+步骤2:tar解包,释放源代码至指定目录
+步骤3:./configure 配置,指定安装目录/功能模块等选项
+步骤4:make 编译,生成可执行的二进制程序文件
+步骤5:make install 安装,将编译好的文件复制到安装目录
+
+
+
+虚拟机A：
+真机
+]# scp /root/桌面/tools.tar.gz root@192.168.4.7:/root/
+
+1.准备源码包inotify-tools-3.13.tar.gz
+[root@svr7 /]# tar -xf /root/tools.tar.gz -C /
+[root@svr7 /]# ls /tools/
+inotify-tools-3.13.tar.gz  other
+[root@svr7 /]# 
+
+2.进行tar解包
+]# mkdir /rsync
+]# tar -xf /tools/inotify-tools-3.13.tar.gz -C /rsync/
+]# ls /rsync/
+]# ls /rsync/inotify-tools-3.13/
+
+3.安装开发工具
+]# yum -y install  make  gcc  
+
+4.  ./configure 配置,指定安装目录/功能模块等选项
+                    --prefix=指定安装目录
+                                  检测系统是否安装gcc
+
+]# cd  /rsync/inotify-tools-3.13/
+]# ./configure 
+
+常见报错提示：没有安装gcc
+checking for gcc... no
+checking for cc... no
+checking for cl.exe... no
+configure: error: no acceptable C compiler found in $PATH
+See `config.log' for more details.
+
+5.进行make编译，生成可以执行的程序
+]# cd  /rsync/inotify-tools-3.13/
+]# make
+
+6.进行make install安装
+]# cd  /rsync/inotify-tools-3.13/
+]# make install
+
+]# ls /usr/local/bin/inotifywait   #检测程序的生成
+/usr/local/bin/inotifywait
+ 
+
+inotifywait监控
+• 基本用法
+– inotifywait [选项] 目标文件夹
+
+• 常用命令选项
+– -m,持续监控(捕获一个事件后不退出)
+– -r,递归监控、包括子目录及文件
+– -q,减少屏幕输出信息
+– -e,指定监视的 modify、move、create、delete、attrib 等事件类别
+
+
+书写Shell同步脚本
+   
+  for循环：处理有次数的重复性操作
+  while死循环：适合处理没有次数的重复性操作
+
+
+
+      格式：
+          for  变量  in   值列表
+           do
+                       重复执行的语句
+           done
+
+           while  [条件]
+           do
+                       重复执行的语句
+           done
+
+[root@svr7 /]# vim /root/rsync.sh
+
+ #!/bin/bash
+ while inotifywait -rqq  /opt  
+ do
+  rsync -az --delete  /opt/  root@192.168.4.207:/opt/  
+ done  &
+
+[root@svr7 /]# /root/rsync.sh
+
+[root@svr7 /]# pgrep -l rsync   #检索rsync进程
+20708 rsync.sh
+
+[root@svr7 /]# kill 20708       #杀死rsync进程
+#######################################################
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,48 @@
+  1 <?xml version="1.0"?>
+  2 <!DOCTYPE mycat:schema SYSTEM "schema.dtd">
+  3 <mycat:schema xmlns:mycat="http://io.mycat/">
+  4         <schema name="TESTDB" checkSQLschema="false" sqlMaxLimit="100">
+  5                 <table name="travelrecord" dataNode="dn1,dn2,dn3" rule="auto-sharding-long" />
+  6                 <table name="company" primaryKey="ID" type="global" dataNode="dn1,dn2,dn3" />
+  7                 <table name="goods" primaryKey="ID" type="global" dataNode="dn1,dn2,dn3" />
+  8                 <table name="hotnews" primaryKey="ID" autoIncrement="true" dataNode="dn1,dn2,dn3"
+  9                            rule="mod-long" />
+ 10                 <table name="employee" primaryKey="ID" dataNode="dn1,dn2,dn3"
+ 11                            rule="sharding-by-intfile" />
+ 12                 <table name="customer" primaryKey="ID" dataNode="dn1,dn2,dn3"
+ 13                            rule="sharding-by-intfile">
+ 14                         <childTable name="orders" primaryKey="ID" joinKey="customer_id"
+ 15                                                 parentKey="id">
+ 16                                 <childTable name="order_items" joinKey="order_id"
+ 17                                                         parentKey="id" />
+ 18                         </childTable>
+ 19                         <childTable name="customer_addr" primaryKey="ID" joinKey="customer_id"
+ 20                                                 parentKey="id" />
+ 21                 </table>
+ 22         </schema>
+ 23         <dataNode name="dn1" dataHost="mysql-53" database="db1" />
+ 24         <dataNode name="dn2" dataHost="mysql-54" database="db2" />
+ 25         <dataNode name="dn3" dataHost="mysql-55" database="db3" />
+ 26         <dataHost name="mysql-53" maxCon="1000" minCon="10" balance="0"
+ 27                           writeType="0" dbType="mysql" dbDriver="native" switchType="1"  slaveThreshold="100">
+ 28                 <heartbeat>select user()</heartbeat>
+ 29                 <writeHost host="hostM1" url="192.168.4.53:3306" user="harry"
+ 30                                    password="123456">
+ 31                 </writeHost>
+ 32         </dataHost>
+ 33         <dataHost name="mysql-54" maxCon="1000" minCon="10" balance="0"
+ 34                           writeType="0" dbType="mysql" dbDriver="native" switchType="1"  slaveThreshold="100">
+ 35                 <heartbeat>select user()</heartbeat>
+ 36                 <writeHost host="hostM2" url="192.168.4.54:3306" user="harry"
+ 37                                    password="123456">
+ 38                 </writeHost>
+ 39         </dataHost>
+ 40         <dataHost name="mysql-55" maxCon="1000" minCon="10" balance="0"
+ 41                           writeType="0" dbType="mysql" dbDriver="native" switchType="1"  slaveThreshold="100">
+ 42                 <heartbeat>select user()</heartbeat>
+ 43                 <writeHost host="hostM3" url="192.168.4.55:3306" user="harry"
+ 44                                    password="123456">
+ 45                 </writeHost>
+ 46         </dataHost>
+ 47 </mycat:schema>
+~                    

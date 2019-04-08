@@ -1,0 +1,78 @@
+60年代  分组交换
+70～80年代  TCP/IP 
+90年代  web
+
+iso
+ieee
+
+internet  广域网  WAN 10～100公里
+		    局域网	LAN 1公里一内
+
+网络拓扑结构
+点对点   一般在wan网络中使用
+
+星形 好实现，容易扩展，方便故障排查
+网状 提高可靠  一般在lan网络使用
+
+bit 比特     100000000bit    1000Mbit=1Gbit
+
+1000=1K
+1000k=1M
+
+双绞线
+utp非屏蔽     stp屏蔽
+
+cat5   五类线      100M
+cat5e  超五类线   100M
+cat6   六类线       1000M
+cat7   七类线       10000M
+
+T568A 
+T568B 白橙  橙  白绿   蓝   白蓝   绿   白棕  棕
+
+光纤
+
+全反线  console 控制线  初次配置设备时使用
+
+win2008   密码 Taren1
+
+交换机工作模式的进入如下：
+Switch>        //当前处于用户模式
+Switch>enable   //切换为特权模式
+Switch# configure terminal  	//进入全局配置模式
+Switch(config)#interface fastEthernet 0/1      //进入接口模式
+exit   //返回上一模式
+end 或 快捷键 ctrl+z //可以在接口模式下直接回到特权模式
+
+修改交换机主机名，要在全局配置模式
+Switch(config)#hostname s1 		//配置主机名
+查看交换机当前的运行配置，要在特权模式
+s1#show running-config  	 //查看当前的运行配置，可以按空格翻页
+
+Switch(config)#enable password Taren1    //配置密码
+Switch#write    //保存配置
+Switch#reload   //重启设备
+Switch#erase startup-config    //清空配置文件，恢复出厂状态
+
+
+配置禁用DNS查询
+switch(config)#no ip domain-lookup
+
+配置输入同步
+Switch(config)#line console 0
+Switch(config-line)#logging synchronous 
+
+解决方法
+配置控制台会话时间，0 0是永不超时
+Switch(config)#line console 0
+Switch(config-line)#exec-timeout 0 0
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,499 @@
+2019-03-21
+
+#################################《mysql视图》##########################################################
+
+55主机： 环境准备
+mysql> create database db9;
+mysql> create table db9.user(
+	> username char(50),
+	> password char(1),
+	> uid int,
+	> guid int,
+	> comment char(200),
+	> homedir char(200),
+	> shell char(50)
+	>);
+mysql> system cp /etc/paswd /var/lib/mysql-files
+mysql> load data infile "/var/lib/mysql-files/passwd" into table db9.user fields terminated by ":"\
+	lines terminated by "\n";
+mysql> alter table db9.user
+	> add
+	> id int parimary key auto_increment first;
+mysql> select * from db9.user;
+
+****************************************************************************************************************
+
+一、MySQL视图
+	1.1 视图介绍
+		1) 虚拟表
+		2) 内容与真实的表相似，有表字段记录
+		3）视图并不在数据库中以存储的数据形式存在
+		4）行和列的数据来自定义视图时查询所引用的基表，并且在具体引用视图时动态生成
+		5）更新视图的数据，就是更新基表的数据
+		6）更新基表数据，视图的数据也会跟着改变
+
+	1.2 视图优点
+		简单：用户不需关心视图中的数据如何查询获得
+		      视图中的数据已经是过滤好的符合条件的结果集合
+		安全：用户只能看到视图中的数据
+		数据独立：一旦视图结果确定，可以屏蔽表结构对用户的影响
+
+	1.3 视图使用规则
+		1）不能在视图上创建索引
+		...............
+
+	1.4 视图的基本规则
+		1 创建
+		   语法格式:
+			create view 视图名称 as SQL查询;
+			create view 视图名称(字段名列表) as SQL查询;    #字段名列表的个数 要与 SQL查询的个数一致
+		2 查看
+			show table status;
+			show table status where comment="view"\G;
+
+			show create view 视图名\G;  #查看创建视图具体，命令
+		3 操作视图表
+			select、insert into、update、delete
+		4 删除
+			drop view 视图名;  #删除视图对基表没有影响
+	2.5 视图进阶
+		2.5.1 设置字段别名 as
+			视图中的字段名不可以重复，
+	mysql> create view 视图名 as select 表名.源字段名 as 字段别名 
+		from 源表名 表别名  left join 源表名 表别名 on 条件；
+
+
+	mysql> create table t1 select username,uid,gid from user9 limit 3;
+	mysql> create table t2 select username,uid,password,shell from user limit 5;
+	mysql> select * from t1,t2 where t1.username = t2.username;
+
+	mysql> create view V3 as select * from t1,t2 where t1.username = t2.username; #会报错
+		ERROR 1060 (42S21): Duplicate column name 'username'
+方法一：
+	mysql> create view V1(a,b,c,d,e,f,g) as select * from t1,t2 where t1.username = t2.username；
+方法二：
+	mysql> create view V2 as
+    		-> select t1.username as a , t1.uid as b , t1.gid as c , t2.username as d , t2.uid as e ,
+   		-> t2.password as f , t2.shell as g from t1,t2 where t1.username = t2.username;
+
+
+		2.5.2 若视图已存在，会强制替换已有的视图
+	mysql> create view 视图名 SQL查询；  #会报错
+	mysql> create view v4 as select username,uid,gid from user9 limit 3;
+	mysql> create view v4 as select username,uid,gid ,shell from user9 limit 9;
+		ERROR 1050 (42S01): Table 'v4' already exists
+
+	mysql> create or replace view 视图名 SQL查询
+	mysql> create or replace view v4 as select username,uid,gid ,shell from user9 limit 9; #成功
+
+		 create [选项] view  视图名  as  SQL查询；
+		
+
+	2.5.3 视图算法 ALGORITHM
+	   UNDEFUNED,未定义
+	   MERGE， 替换方式（默认）：访问v7时，不会单独执行创建v7的命令，而是直接到v7的基表里访问
+	   TEMPTABLE， 具体化方式：客户端访问view表，先单独执行创建视图v7时的命令，再存放在本机的内存里
+	mysql>  create ALGORITHM=TEMPTABLE view v7 as select username,uid from user9;
+	mysql> show create view v7\G;
+
+
+	2.5.4 限制对视图表的操作 with check option(检查选项)
+		local 仅检查当前视图的限制 （对视图做操作时，必须要满足本身的限制）
+		cascaded 同时要满足基表的限制（默认值）
+
+	mysql> create view v8 as select username,uid from user9 where 
+                    uid>=100 and uid<=1000 with local check option;
+	mysql> update v10 set uid=1001 where username="root";  #更新失败
+	mysql> update v10 set uid=99 where username="root";  #更新失败
+	mysql> create view v9 as select * from v8 where uid>=900 with check 							option; #默认为cascaded
+
+二、MySQL存储过程 : #相当于mysql中的脚本
+	2.1 存储过程介绍？ mysql服务的脚本
+	   指的是数据库中保存的一系列SQL命令的集合；
+	   可以在存储过程中使用变量、条件判断、流程控制等
+
+	2.2 存储过程优点
+	    1）可以减轻网络负担
+	    2）可以防止对表的直接访问
+	    3）避免重复编写SQL操作
+
+	2.3 基本使用
+		2.3.1 创建存储过程
+			delimiter //  #将结束改为//  默认为（；），代码中可能会出现分号，会影响结束
+			create procedure 库名.存储过程名()
+			begin
+				代码
+			end			
+			//
+			delimiter ;    #将结束符再改为分号
+
+		2.3.2 执行存储过程
+			call 库名.存储过程名()
+						
+		2.3.3 查看存储过程
+			2.3.3.1 查看服务器上已有的存储过程
+		方法一：
+			mysql> show procedure status;
+		方法二：
+			mysql> select db,name,body from mysql.proc where type="procedure";	
+	
+			mysql> select db,name,body from mysql.proc where type="procedure" and name="存储过程名";
+			2.3.3.2 查看存储过程的功能代码
+
+		2.3.4 删除存储过程
+			mysql> drop procedure 库名.存储过程名()
+
+2.4 存储过程进阶
+	2.4.1 变量类型：
+		 全局变量：数据库服务启动时定义的变量
+		mysql> show global variables;  #查看所有全局变量
+		mysql> show global variables like "%host%"; #查看与host有关的全局变量
+
+		会话变量：客户端连接服务器后产生的变量
+		mysql> show session variables;  #显示所有会话变量，当前连接有效
+		mysql> show session variables like "%time%";
+		mysql> set session sort_buffer_size=40000;  #修改某个当前会话的值
+		mysql> show session variables like "sort_buffer_size";  #查看会话变量
+
+		用户变量：当前连接服务器用户定义的变量
+		mysql> set @i=7 , @j=9 , @name="haryy"; #定义多个变量，用逗号隔开
+		mysql> select @i , @j , @name ;  #查看多个用户变量
+
+		局部变量：在存储过程里定义的变量
+		delimiter //
+		create procedure say2()
+		begin
+			declare name char(10);   #declare定义局部变量
+			declare age int;
+			set name="harry",age=88;  #set 定义自定义变量
+			select name , age;
+		end 
+		//
+		delimiter ;
+
+
+	mysql> delimiter //
+		mysql> create procedure say3()
+		    -> begin
+		    -> declare x int;
+		    -> declare y int;
+		    -> select count(username) into x from db9.user9 where shell="/bin/bash";
+		    -> select count(username) into y from db9.user9 where shell!="/bin/bash";
+		    -> end
+		     -> //
+		mysql> delimiter ;
+		mysql> call say3();
+
+
+	2.4.2 存储过程参数
+	参数类型：in ：把数据传递给存储过程处理
+		  out ： 接收存储过程的处理结果
+		  inout：前两者功能的结合
+	delimiter //
+	create procedure 库名.存储过程名( 参数类型  变量名 变量的类型） 
+	begin
+	 	代码
+	end
+	//
+
+	mysql> delimiter //
+	mysql> create procedure say5( in user_name_char(10) )
+		> begin
+		> select username,uid from db9.user9 where username=user_name;
+		> end
+		> //
+	mysql> delimiter ;
+	mysql> call say6("abrt");
+	mysql> set @i="root";
+	mysql> call say6(@i);
+		+----------+------+
+		| username | uid  |
+		+----------+------+
+		| abrt     |  173 |
+		+----------+------+
+
+	mysql> delimiter //
+	mysql> create procedure say7( in shell_name char(190), out numbers int )
+		> begin	
+		> select count(username) into numbers from db9.user9 where shell=shell_name;
+		> select numbers;  # 输出统计的结果
+		> end
+		> //
+	mysql> delimiter ;
+	mysql> call say7("/bin/bash",@x);  #调用函数，将统计的结果存放在定义的变量x中
+	mysql> select @x;
+
+	mysql> delimiter //
+	mysql> create procedure say7( inout line_num int )
+		> begin	
+		> select * from db9.user where id <=line_num;
+		> select count(username) from db9.user9 ;
+		> select line_num;
+		> end
+		> //
+	mysql> delimiter ;
+	mysql> set @k=4;
+	mysql> call say9(@k);
+
+2.3.4 算术运算 + - * /或DIV %
+	  mysql> set @i = 1 + 2;
+	  msyql> select @i;
+	  mysql> set @x=9 , @y=8;
+	  mysql> set @z = @x + @y
+	  msyql> select @z;
+
+
+mysql> create procedure say11()
+    -> begin
+    -> declare x int;
+    -> declare y int;
+    -> declare z int;
+    -> set x = 0 , y = 0;
+    -> select count(username) into x from db9.user9 where shell="/bin/bash";
+    -> select count(username) into y from db9.user9 where shell="/sbin/nologin";
+    -> set z = x + y ;
+    -> select x , y , z ;
+    -> end
+     -> //
+mysql> call say11();
+
+2.3.4 条件判断
+	
+
+
+2.3.5 流程控制
+	2.3.5.1   if 结构  （选择结构）
+	if 条件测试  then
+	  ....代码
+	else
+	  ... 代码
+	end if;	
+mysql> delimiter //
+mysql> create procedure say20( in x int )
+    -> begin
+    -> if x < 20 then
+    -> select * from db9.user9 where id <= x;
+    -> else
+    -> select * from db9.user9 where id > x;
+    -> end if;
+    -> end
+    -> //
+mysql> delimiter ;
+mysql> call say20(5);
+
+
+2.3.5.3 循环结构(需要重复执行的命令放到循环结构）
+	while 循环
+
+	1）while 条件判断 do   #反复测试条件，只要条件成立就执行命令序列
+		循环体
+	   end while；
+
+	2） loop死循环：无判断条件，反复执行某一段代码
+	   loop
+		循环体	
+		....
+	   end loop;	
+
+	3）repeat条件式循环：当条件成立时结束循环
+	   repeat
+		循环体
+		.....
+	        until 条件判断
+	    end repeat;
+
+
+	do...while
+
+例子1：
+	mysql> delimiter //
+	mysql> create procedure pp( in line_num int )
+		> begin
+		> declare x int;
+		> set x = 1;
+		> while x <= line_num do  
+		> select x;
+		> set x=x+1;
+		> end while ;
+		>end
+		> //
+	mysql> call pp(2);  #输出1～N
+
+例子2：
+	mysql> create procedure pp3()
+		> begin
+		> declare x int;
+		> set x=4;
+		> loop 
+		> select x;
+		> end loop;
+		> end 
+		> //
+	mysql> call pp3();   #反复输出x=4；
+
+例子3：
+	mysql> create procedure pp5( in y int )
+	    -> begin
+	    -> declare x int;
+	    -> set x=1;
+	    -> repeat
+	    -> select x;
+	    -> set x=x+1;
+	    -> until x>y
+	    -> end repeat;
+	    -> end
+	     -> //	
+	mysql> call pp5(5);  #输出1～5
+
+
+2.3.5.4  流程控制命令
+		控制循环结构的执行的执行，while、loop、repeat
+		LEAVE 标签名   #跳出循环/结束循环
+		iterate 标签名  #结束本次循环，并开始下次循环
+
+例子1：
+	mysql> create procedure pp6()
+	    -> begin
+	    -> declare x int;
+	    -> set x=1;
+	    -> abc:while x<=10 do
+	    -> if x=6 then  #当条件成立的时候结束循环
+	    -> leave abc;
+	    -> end if;
+	    -> select x;
+	    -> set x=x+1;
+	    -> end while;
+	    -> end
+	    -> //
+	mysql> call pp6;  #输出1～5
+
+例子2:
+	mysql> create procedure pp()
+	    -> begin
+	    -> declare x int;
+	    -> set x=1;
+	    -> gg:while x<=10 do
+	    -> if x=5 or x=6 then
+	    -> set x=x+1;
+	    -> iterate gg;
+	    -> end if;
+	    -> select x;
+	    -> set x=x+1;
+	    -> end while;
+	    -> end
+	    -> //
+	mysql> call pp;  #输出除了5和6之外的值
+
+
+	mysql> create procedure p3( in num int)
+	    -> begin
+	    -> if num is not null then
+	    -> select * from user where id <= num;
+	    -> else
+	    -> select * from user where id=1;
+	    -> end if;
+	    -> end
+	    -> //
+
+
+
+
+
+
+
+************************************************************************
+delimiter //
+create procedure say1()
+begin
+	select count(*) from db9.user9;
+end 
+//
+delimiter ;
+
+****************************************************************************
+
+delimiter //
+create procedure say2()
+begin
+	declare name char(10);
+	declare age int;
+	set name="harry",age=88;
+	select name , age;
+end 
+//
+delimiter ;
+
+
+#######################################################
+
+
+#!/bin/bash
+
+for i in `seq 9`
+do 
+    for j in j<=i
+     do
+	 sum=[$i+$j]
+	  p=[$sum%2]
+	if [ $p -eq 0 ];then
+	   echo -ne "\033[32m  \033[om"
+	else
+	    echo -ne "\033[36m  \033[0m"
+     done
+    echo ""
+done
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,382 @@
+2019-04-01
+
+###############################################################################
+服务与安全：系统安全   服务安全   数据安全   网络安全    监    控
+
+1 Linux基本防护
+    1.1 账户安全
+	与用户相关的命令
+	   useradd  usermod  userdel  passwd  id  chage  
+	与用户相关的配置文件
+	    /etc/passwd    /etc/shadow  
+	    /etc/login.defs   /etc/skel/（新建用户家目录的模板文件）
+
+[root@mysql-50 ~]# ls -a /etc/skel/ #每个新建用户的家目录都会该目录下的文件
+.  ..  .bash_logout  .bash_profile  .bashrc  .mozilla
+
+设置帐号有效期：
+使用chage工具
+[root@mysql-50 ~]# chage --help
+用法：chage [选项] 登录
+选项：
+  -d, --lastday 最近日期        将最近一次密码设置时间设为“最近日期”
+  -E, --expiredate 过期日期     将帐户过期时间设为“过期日期”
+  -h, --help                    显示此帮助信息并推出
+  -I, --inactive INACITVE       过期 INACTIVE 天数后，设定密码为失效状态
+  -l, --list                    显示帐户年龄信息
+  -m, --mindays 最小天数        将两次改变密码之间相距的最小天数设为“最小天数”
+  -M, --maxdays 最大天数        将两次改变密码之间相距的最大天数设为“最大天数”
+  -R, --root CHROOT_DIR         chroot 到的目录
+  -W, --warndays 警告天数       将过期警告天数设为“警告天数”
+
+ -d 0 ，强制（需要）修改密码  #另开终端用该用户连接上后，需要修改密码
+ -E yyyy-mm-dd，指定失效日期（-1 取消）
+]# chage -d 0 lisi #强制lisi用户登陆后要修改密码
+]# chage -E 2019-04-02 lisi  #设置lisi用户的账户过期时间
+
+强制定期修改密码：
+配置文件/etc/login.defs：对新建的用户有效
+ ~]# grep -v "#" /etc/login.defs
+	PASS_MAX_DAYS    99999       #密码最长有效期
+	PASS_MIN_DAYS    0           #密码最短有效期，0表示永久有效 1表示有效期为1天
+	PASS_MIN_LEN     5           #密码最短长度
+	PASS_WARN_AGE    7           #密码过期前几天提示警告信息
+	UID_MIN          1000        #UID最小值
+	UID_MAX          60000       #UID最大值
+
+帐号的锁定/解锁：
+使用passwd命令
+	  -l 锁定、-u解锁、-S 看状态
+	]# passwd -l jim  #锁定用户jim的密码
+	]# passwd -l lisi  #锁定用户lisi的账户
+	]# passwd -S lisi  #查看用户lisi的状态
+	   lisi LK 2019-04-01 0 99999 7 -1 (密码已被锁定。)
+	[root@mysql-50 ~]# passwd -u lisi  #解锁用户lisi的帐号
+
+[root@proxy ~]# passwd -d 用户名        #清空用户口令
+
+1.2 伪装登陆提示：
+	配置文件：/etc/issue 、 /etc/issue.net
+	-- 分别适用与本地、远程登陆
+	-- 默认会提示内核、系统等版本信息
+	]# vim /etc/issue  #退出tty终端，或重启后，终端提示信息会变成自定义的文本内容
+	   Windows Server 2012 Enterprise R2
+	   NT 6.2 Hybrid
+
+附加：对于操作系统来说，文件系统也可以通过添加额外属性来提高性能与安全性。
+[root@proxy ~]# cat /etc/fstab
+	/dev/vda1   /boot    xfs   defaults,noexec   0  0
+	/dev/vda3   /home    xfs   defaults,noatime  0  0
+	备注：
+	noexec属性可以让分区下的所有程序都不可执行，包括病毒与木马
+	noatime让分区下的所有文件都不再更新atime时间，atime时间为文件的访问时间
+
+1.3 文件系统安全：
+	1.3.1 程序和服务控制
+   1）禁用非必要的系统服务
+	适用systemctl、chkconfig工具
+	RHEL7  systemctl disable 服务名  #设置开机不自启
+	RHEL6  chkconfig  服务名  off    #设置开机不自启
+
+	systemctl enable  服务名 #设置开机自启
+	chkconfig 服务名  on   #设置开机自启
+
+	1.3.2 锁定/解锁保护文件
+  1）EXT3/EXT4的文件属性控制
+	chattr  设置属性（添加或删除）
+	lsattr  查看特殊属性
+   2）+、-、=控制方式
+	属性i：不可变（immutable）---重要文件要加i属性，防止误操作
+	属性a：仅可追加（append only）
+	]# chattr +a  文件名   #锁定后文件仅可以追加，-a 解锁文件
+	]# chattr +i  文件名   #锁定文件（无法修改、删除等） -i解锁文件
+
+	]# lsattr  文件名    #查看文件特殊属性
+	]# lsattr /etc/resolv.conf
+
+
+2 用户切换与提取
+    2.1 su 
+	su 用户名 ：只是用户身份改变了，但环境还是原来用户的环境，没有改变；$PWD\$PATH
+	su - 用户名：把用户身份和环境一起切换
+	su - ：不加用户名，就是切换为管理员root
+
+	su - -c "命令" [目标用户]
+	]$ su - -c "touch /root/test11.txt" root 
+	 #临时切换到root用户身份，执行命令(要知道root密码）--会泄露root密码
+
+安全日志/var/log/secure：记录su验证、shell开启和关闭
+
+
+    2.2 sudo：用户提权（让普通用户登陆系统后可以执行root用户的命令）
+	1）管理员预先为用户设置执行许可
+	2）被授权用户有权执行授权的命令，验证自己的口令
+
+命令格式：
+	1）用户查看可以使用的授权 sudo -l
+	2）用户执行提权命令
+		]# sudo 提权命令
+		]# sudo [-u 目标用户] 特权命令
+用户提权：
+	]# visudo
+	]# which vim #查看命令的绝对路径
+	]# vim /etc/sudoers #默认为只读文件，要强制保存退出wq!
+	普通用户  主机名列表=命令列表 （使用命令的绝对路径），NOPASSWD：ALL
+	%用户组名  主机名列表=命令列表（使用命令的绝对路径），NOPASSWD：ALL
+
+	]# vim /etc/sudoers
+	99 #%wheel ALL=(ALL)   ALL #提权前要将wheel组注释掉 
+
+	[root@mysql-50 ~]# useradd dachui   #创建用户并设置密码
+	[root@mysql-50 ~]# useradd tiechui
+	[root@mysql-50 ~]# useradd niuben
+	[root@mysql-50 ~]# echo 1|passwd --stdin dachui
+	[root@mysql-50 ~]# echo 1|passwd --stdin tiechui
+	[root@mysql-50 ~]# echo 1|passwd --stdin niuben
+
+	]# vim /etc/sudoers  #给dachui用户提权
+	.......
+	dachui localhost,mysql-50=/usr/bin/rpm,/usr/bin/yum,/usr/bin/systemctl * httpd,/usr/bin/vim /etc/httpd/conf/httpd.conf
+	[dachui@mysql-50 ~]$ sudo -l  #用户tiechui查看自己的能使用的授权
+	[dachui@mysql-50 ~]$ sudo yum -y install httpd #用户使用授权命令要加sudo
+
+	#分别给其他两个用户进行提权
+
+
+允许mike以root权限执行/sbin/下的所有命令；但是，禁止修改eth0网卡的参数
+	]# vim /etc/sudoers
+	......
+	mike  localhost,mysql-50=/sbin/* ,!/sbin/ifconfig eth0  # !表示取反
+
+
+修改全局配置/etc/sudoers，启动日志添加：
+	Defaults logfile="/var/log/sudo"
+
+sudo别名设置：提高可重用性、易读性；减化配置、使记录更有条理
+	]# vim /etc/sudoers  #别名---先定义后调用；别名的名称必须全大写
+	.....
+	User_Alias MYUSER=nb,dachui,tiechui    #定义别名
+	Host_Alias MYHOST=localhost,mysql-50
+	Cmnd_Alias MYCMND=/usr/bin/rpm,/usr/bin/mkdir,/usr/bin/*
+	MYUSER MYHOST=MYCMND  #调用别名
+
+
+3 SSH 访问控制
+ 3.1 ssh基本防护
+	1）存在的安全隐患
+	   ---密码嗅探，键盘记录
+	   ---暴力枚举帐号、猜解密码
+	2）常见的防护措施	
+	   --- 用户限制、黑白名单
+	   --- 更改验证方式（密码--->密钥对）
+	   --- 防火墙.. ..
+
+ 3.2 sshd基本安全配置
+     1）配置文件/etc/ssh/sshd_config
+	  Port 3389    #修改非标准端口
+  	  Protocol 2   #启用ssh V2版本协议（不用改）
+	  ListenAddress 192.168.168.174
+	  PermitRootLogin no  #禁止root登陆
+ 	  UseDNS no  #不解析客户机地址
+	  LoginGraceTime 1m  #登陆限时
+	  MaxAuthTries 3  #每次连接最多认证次数
+
+例子：修改端口为2222，ListenAddress 192.168.4.50
+   ]# vim etc/ssh/sshd_config
+	......
+	port 2222
+	ListenAddress 192.168.4.50
+   ]# systemctl restart sshd
+   ]# ssh -p 2222 用户名@192.168.4.50  #定义后，连接时需要添加 端口 和 用户名
+
+ 3.3 sshd黑/白名单配置
+   3.3.1 白名单：仅允许列表里的用户连接ssh服务
+	AllowUsers   用户名列表     #多个用户用空格分开
+	AllowGroups  用户组名列表   #允许组内的用户访问
+	#写了白名单后，只有白名单中的用户才可以连接，默认其他用户不能访问
+
+   3.3.2 黑名单：在列表里的用户不允许连接ssh服务
+	DenyUsers   用户名列表
+	DenyGroups  用户组名列表
+
+ 	]# vim /etc/ssh/ssd_config
+	.....
+	#AllowUsers root@192.168.4.254  nb  #黑白名单一般不同时使用
+	#仅允许254的root用户连接，任何主机使用nb用户可以连接50主机
+	DenyUsers nb niuben   #除了用户nb、nuiben外，其他用户可以访问连接50主机
+
+ 3.4 ssh密钥对验证
+	1）创建密钥对
+	    私钥文件：id_rsa
+	    公钥文件：id_rsa.pub
+	2）上传公钥
+	    id_rsa.pub
+	3）导入公钥信息
+	     公钥库：.ssh/authorized_keys
+创建ssh密钥对：
+使用工具ssh-keygen
+   可以手动指定加密算法（-t rsa 或 -t dsa）
+   若不指定，默认采用RSA加密
+
+办公室：真机254 ----将办公室里的私钥拷贝到u盘中，在拷贝给家用电脑和出差用的电脑
+家用：57
+出差：58
+++++++++++++++++++++++++++++++++++++++++++++++
+]# vim /etc/ssh/ssd_config
+	.....
+	PasswordAuthentication no  #不允许用密码连接
+]# ssh root@192.168.4.50 可以连接且不需要密码，其他用户不允许连接
+
+   #生产环境中，办公室电脑有无密码连接服务器的私钥（id_rsa）,要想在家里或出差的时候也可以无密码连接服务器，只需要将私钥文件（id_rsa）拷贝走，放入其他主机的/root/.ssh/目录下即可。
+
+
+4 SELinux安全防护
+   4.1 什么是SELinux？
+	1）security-Enhanced Linux
+	   * 一套强化Linux安全的扩展模块
+	   * 美国国家安全局主导开发
+	2）SELinux的运行机制
+	   * 集成到Linux内核（2.6及以上）
+	   * 操作系统提供可定制的策略、管理工具
+[root@mysql-58 ~]# rpm -qa |grep selinux  #selinux相关的软件包
+
+[root@lvs-57 ~]# sestatus  #查看selinux的状态
+
+[root@lvs-57 ~]# ls /etc/selinux/   #selinux相关的文件
+	config  final  semanage.conf  targeted  tmp
+
+  4.2 安全上下文（打标签）---给文件或目录打标签(冒号分隔，四列）
+	1）文件 ls -lZ   文件名
+	   [root@lvs-57 ~]# ls -lZ /etc/passwd
+	2）目录 ls -ldZ  目录名
+	   [root@lvs-57 ~]# ls -ldZ /etc/
+	3）进程 ps aux -Z |grep -i  进程名
+	   [root@lvs-57 ~]# ps aux -Z |grep -i httpd
+
+	    system_u:object_r:passwd_file_t:s0 /etc/passwd
+	    system_u:object_r:etc_t:s0       /etc/
+	    system_u:system_r:httpd_t:s0
+属性构成---> 用户：角色：访问类型：选项...
+
+一般操作规律：
+	1）移动的文件：原有的上下文属性不变
+	2）复制的文件：自动继承目标位置的上下文
+
+修改安全上下文：要指定正确的类型是什么
+  使用chcon工具
+	-t 指定访问类型
+	-R 递归修改
+
+[root@lvs-57 ~]# ls -ldZ /var/www/html/a.html 
+...unconfined_u:object_r:httpd_sys_content_t:s0 /var/www/html/a.html
+[root@lvs-57 ~]# ls -ldZ /var/www/html/b.html 
+...unconfined_u:object_r:admin_home_t:s0 /var/www/html/b.html
+[root@lvs-57 ~]# ls -ldZ /var/www/html/c.html 
+...unconfined_u:object_r:admin_home_t:s0 /var/www/html/c.html
+[root@lvs-57 ~]# ls -ldZ /var/www/html/d.html 
+...unconfined_u:object_r:admin_home_t:s0 /var/www/html/d.html
+
+
+方法一：要知道正确的类型
+ 	~]# chcon -t httpd_sys_content_t /var/www/html/b.html
+	~]# chcon -R -t httpd_sys_content_t /var/www/html/
+方法二：恢复访问类型
+	 ~]# restorecon /var/www/html/d.html 
+	 ~]# restorecon -R /var/www/html/
+
+./autorelabel文件：下次重启后全部重制
+
+  4.3 调整selinux布尔值(功能开关)
+
+
+	
+例子：	 在开启设为enforcing，允许匿名用户访问ftp服务，对/var/ftp/sharedir目录有上传文件和下载文件的权限。get下载  lcd上传 put hosts
+57:
+]# yum -y install vsftpd
+]# mkdir /var/ftp/sharedir
+]# chmod -R o+w /var/ftp/sharedir/  #要赋于共享文件夹其他人有写入权限
+]# cp /etc/passwd /var/ftp/sharedir
+]# vim /etc/vsftpd/vsftpd.conf
+	......
+ 29 anon_upload_enable=YES  #开启匿名登陆功能（配置文件中有提示要开启那些布尔值）
+
+58 
+~]# yum -y install ftp  #提供ftp命令
+~]# ftp 192.168.4.57  #连接57主机的ftp
+~]# getsebool -a  #查看全部布尔值
+~]# getsebool -a |grep -i ftp  #查看有关ftp的布尔值
+~]# setsebool -P tftp_anon_write on   #修改布尔值，-P 永久生效
+~]# setsebool -P ftpd_full_access on  #on/off  开/关
+
+查看selinux 程序的日志信息排错：
+	#在不知道需要打开那个bool值时，可查看selinux日志，来找到那个设置导致无法器服务。
+	/var/log/message #没有独立日志文件的服务会把日志信息写进这个文件里
+
+例子：修改httpd监听的80端口为8070，重启httpd服务时会失败
+[root@lvs-57 ~]# rpm -qa |grep -i shoot   #查看selinux的日志软件包
+setroubleshoot-3.2.28-3.el7.x86_64
+setroubleshoot-server-3.2.28-3.el7.x86_64
+setroubleshoot-plugins-3.0.65-1.el7.noarch
+	
+~]# grep setroubleshoot /var/log/messages |tail -1  #查看最新的selinux日志信息
+Apr  2 09:27:56 lvs-57 setroubleshoot: SELinux is preventing /usr/sbin/httpd from name_bind access on the tcp_socket port 8070. For complete SELinux messages run: sealert -l 19afdc85-4cb3-4dea-ad34-26559b8b7ea0
+
+~]# sealert -l 19afdc85-4cb3-4dea-ad34-26559b8b7ea0  #运行会有提示信息
+	.........
+Do
+# semanage port -a -t PORT_TYPE -p tcp 8070
+    其中 PORT_TYPE 是以下之一：http_cache_port_t, http_port_t, jboss_management_port_t, jboss_messaging_port_t, ntop_port_t, puppet_port_t。
+
+]# semanage port -a -t http_port_t -p tcp 8070 #
+]# systemctl restart httpd  #重启成功，若不成功则按提示信息修改，直到服务起来
+]# ss -antulp |grep httpd  #查看有8070端口
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

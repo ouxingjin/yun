@@ -1,0 +1,119 @@
+2019-10-29
+###############################################################
+
+STP生成树算法
+
+1.广播风暴的产生
+交换机工作原理：
+   — 根据MAC地址表转发数据帧，如果地址未知，则广播
+   — 如果交换机接收到广播帧也会向所有接口发送
+   — 当网络中存在物理环路，会产生广播风暴
+
+----------拓扑图搭成了环形
+
+STP概述
+
+----STP -- Spanning  Tree Protocol（生成树协议）
+       逻辑上断开环路，防止广播风暴的产生
+       当线路故障，阻塞接口被激活，恢复通信，起备份线路的作用
+
+选择根网桥 ---- 总指挥（主根网桥）-->副指挥（次根网桥）---与次根网桥相连的接口为阻塞接口
+1.网桥ID（BID）
+  — 网桥ID是唯一的，交换机之间选择BID值最小的交换机作为网络中的根网桥
+
+     网桥优先级 | 网桥的MAC地址
+优先级取值范围： 0～65535 ----  4096的倍数
+        默认值：32768
+
+查看交换机本身的mac地址：
+ Switch# show version
+
+
+2.STP配置
+
+— pvst+ 的配置命令
+  启用生成树命令：
+    Switch(config)#spanning-tree vlan  编号
+  指定根网桥：
+     Switch(config)#spanning-tree vlan  编号 priority Bridge-priority
+   或                                                 ------针对已经修改过的网络
+     Switch(config)#spanning-tree vlan  编号 root {primary | secondary}
+                                                      ---针对没有改过的网络
+     网桥优先级（priority） | 网桥的MAC地址
+优先级取值范围： 0～65535 ----  4096的倍数
+        默认值：32768
+
+可以通过提高自己的优先级、或降低别人的优先级来使自己变成主根、次根。
+
+查看生成树的配置：
+  Switch# show spanning-tree
+查看某个VLAN的生成树详细信息：
+   Switch# show spanning-tree vlan vlan-id
+
+
+PWD：转发状态
+BLK：阻塞状态
+
+
+
+—— PVST + 配置的意义
+    -- 配置网络中比较稳定的交换机为根网桥
+    -- 利用PVST + 实现网络的负载分担
+
+PVST + ：每个vlan配置生成树，可以实现负载均衡
+
+
+
+
+
+
+MS1  
+vlan1 的主根  vlan2的次根
+Switch(config)#spanning-tree vlan  1 priority 24576  //修改生成树优先级为主根
+Switch(config)#spanning-tree vlan 2 root secondary
+
+MS2
+vlan2 的主根  vlan1的次根
+
+
+
+
+二、HSRP的相关概念
+
+1.热备份路由选择协议
+  -- HSRP（Hot Standby Routing Pcotocol）
+  -- Cisco私有协议
+
+
+HSRP的配置命令：
+1.配置为HSRP的成员
+
+
+
+
+
+
+
+占先全（preempt）：当本机优先级大于其他主机时，立刻成为活跃路由器
+Switch(config)#in vlan 1
+Switch(config-if)#standby 1 priority 105  //修改优先级
+Switch(config-if)#standby 1 preemtp   //配置占先权
+
+
+
+
+MS1  
+vlan1 （stp）主根     （hsrp）活跃      vlan2 次根  备份
+
+
+
+
+MS1  
+vlan1 次根     备份  vlan2  主根  活跃
+
+
+
+
+
+
+
